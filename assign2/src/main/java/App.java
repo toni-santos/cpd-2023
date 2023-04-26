@@ -1,20 +1,20 @@
 import client.Client;
 import server.Server;
 
+import java.io.IOException;
+
 public class App {
-    public static void main(String[] args) {
+    public static void main(String[] args) throws IOException {
         if (args.length != 1) {
             System.out.println("missing argument");
         }
 
         switch (args[0]) {
             case "client" -> {
-                Client client = new Client();
-                client.launch();
+                Client.launch();
             }
             case "server" -> {
-                Server server = new Server();
-                server.launch();
+                Server.launch();
             }
             default -> System.out.println("invalid argument");
         }

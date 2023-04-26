@@ -1,11 +1,17 @@
 package client;
 
+import server.ServerCodes;
+
 import java.net.*;
 import java.io.*;
+import java.nio.ByteBuffer;
+import java.nio.channels.SocketChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Scanner;
+
+import static server.ServerCodes.OK;
 
 /**
  * This program demonstrates a simple TCP/IP socket client.
@@ -14,63 +20,58 @@ import java.util.Scanner;
  */
 public class Client {
 
-    public void launch() {
+    private final String HOSTNAME = "localhost";
+    private final int PORT = 9000;
+    private String user;
 
-        String hostname = "localhost";
-        int port = 9000;
+    public void run() throws IOException {
+        SocketChannel socketChannel = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
+        socketChannel.configureBlocking(false);
 
-        try (Socket socket = new Socket(hostname, port)) {
-            Scanner consoleInput = new Scanner(System.in);
+        Scanner consoleInput = new Scanner(System.in);
 
-            OutputStream output = socket.getOutputStream();
-            PrintWriter writer = new PrintWriter(output, true);
-
-            InputStream input = socket.getInputStream();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
-
-            System.out.println("Connected to the server!");
-
-            logInRegister(consoleInput, writer, reader);
-
-        } catch (UnknownHostException ex) {
-
-            System.out.println("Server not found: " + ex.getMessage());
-
-        } catch (IOException ex) {
-
-            System.out.println("I/O error: " + ex.getMessage());
+        if (socketChannel.isConnected()) {
+            logInRegister(consoleInput, socketChannel);
         }
+        socketChannel.close();
     }
 
-    private boolean logInRegister(Scanner consoleInput, PrintWriter writer, BufferedReader reader) {
+    public static void launch() throws IOException {
+        Client client = new Client();
+        client.run();
+    }
+
+    private boolean logInRegister(Scanner consoleInput, SocketChannel socketChannel) throws IOException {
         int opt = logInRegisterSelection(consoleInput);
         List<String> creds = getUserCredentials(consoleInput);
 
-        creds.add(String.valueOf(opt));
-
-        writer.write(String.join(",", creds));
-
-        String result = null;
-
-        try {
-            result = reader.readLine();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
-        if (parseLogInResult(result)) {
-            System.out.println("Login successful");
-            return true;
+        if (opt == 1) {
+            creds.add(0, String.valueOf(ServerCodes.LOG));
         } else {
-            System.out.println("Failed to login!");
-            return logInRegister(consoleInput, writer, reader);
+            creds.add(0, String.valueOf(ServerCodes.REG));
         }
-    }
 
-    private boolean parseLogInResult(String result) {
-        List<String> res = List.of(result.split(","));
+        socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        int bytesRead = socketChannel.read(buffer);
+        if (bytesRead == -1) {
+            return false;
+        }
+        String rawMessage = new String(buffer.array()).trim();
+        System.out.println(rawMessage);
+        ServerCodes result = ServerCodes.valueOf(rawMessage);
 
-        return res.get(0).equals("OK");
+        if (result == OK) {
+            if (opt == 1) {
+                System.out.println("Login successful!");
+            } else {
+                System.out.println("Register successful!");
+            }
+        } else {
+            System.out.println("Login/register failed!");
+            return logInRegister(consoleInput, socketChannel);
+        }
+        return true;
     }
 
     private List<String> getUserCredentials(Scanner consoleInput) {
