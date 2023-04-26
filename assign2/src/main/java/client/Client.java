@@ -1,32 +1,120 @@
 package client;
 
-import java.io.*;
 import java.net.*;
+import java.io.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Scanner;
 
+/**
+ * This program demonstrates a simple TCP/IP socket client.
+ *
+ * @author www.codejava.net
+ */
 public class Client {
+
     public void launch() {
-        try {
-            // Create a socket to connect to the server
-            Socket socket = new Socket("localhost", 5000);
-            System.out.println("Connected to server.");
 
-            // Create input and output streams for the socket
-            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true);
+        String hostname = "localhost";
+        int port = 9000;
 
-            // Send data to the server
-            String message = "Hello from client!";
-            out.println(message);
+        try (Socket socket = new Socket(hostname, port)) {
+            Scanner consoleInput = new Scanner(System.in);
 
-            // Receive response from the server
-            String response = in.readLine();
-            System.out.println("Received response from server: " + response);
+            OutputStream output = socket.getOutputStream();
+            PrintWriter writer = new PrintWriter(output, true);
 
-            // Close socket
-            socket.close();
-            System.out.println("Disconnected from server.");
-        } catch (IOException e) {
-            e.printStackTrace();
+            InputStream input = socket.getInputStream();
+            BufferedReader reader = new BufferedReader(new InputStreamReader(input));
+
+            System.out.println("Connected to the server!");
+
+            logInRegister(consoleInput, writer, reader);
+
+        } catch (UnknownHostException ex) {
+
+            System.out.println("Server not found: " + ex.getMessage());
+
+        } catch (IOException ex) {
+
+            System.out.println("I/O error: " + ex.getMessage());
         }
     }
+
+    private boolean logInRegister(Scanner consoleInput, PrintWriter writer, BufferedReader reader) {
+        int opt = logInRegisterSelection(consoleInput);
+        List<String> creds = getUserCredentials(consoleInput);
+
+        creds.add(String.valueOf(opt));
+
+        writer.write(String.join(",", creds));
+
+        String result = null;
+
+        try {
+            result = reader.readLine();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+        if (parseLogInResult(result)) {
+            System.out.println("Login successful");
+            return true;
+        } else {
+            System.out.println("Failed to login!");
+            return logInRegister(consoleInput, writer, reader);
+        }
+    }
+
+    private boolean parseLogInResult(String result) {
+        List<String> res = List.of(result.split(","));
+
+        return res.get(0).equals("OK");
+    }
+
+    private List<String> getUserCredentials(Scanner consoleInput) {
+        String username = getUsername(consoleInput);
+        String password = getPassword(consoleInput);
+
+        return new ArrayList<String>(Arrays.asList(username, password));
+    }
+
+    private String getUsername(Scanner consoleInput) {
+        System.out.print("Username: ");
+        String username = consoleInput.next();
+
+        return username;
+    }
+
+    private String getPassword(Scanner consoleInput) {
+        System.out.print("Password: ");
+        String password = consoleInput.next();
+
+        if (password.length() < 8) {
+            System.out.println("Invalid password, try again!");
+            return getPassword(consoleInput);
+        }
+
+        return password;
+    }
+
+
+    private int logInRegisterSelection(Scanner consoleInput) {
+        System.out.print("1. Log In\n2. Register\n- ");
+
+        int opt = consoleInput.nextInt();
+
+        switch (opt) {
+            case 1, 2 -> {
+                return opt;
+            }
+            default -> {
+                System.out.println("Invalid input, try again!");
+                return logInRegisterSelection(consoleInput);
+            }
+        }
+    }
+
+
 }

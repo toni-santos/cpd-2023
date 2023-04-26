@@ -3,38 +3,36 @@ package server;
 import java.io.*;
 import java.net.*;
 
+/**
+ * This program demonstrates a simple TCP/IP socket server.
+ *
+ * @author www.codejava.net
+ */
 public class Server {
-    public void launch() {
-        try {
-            // Create a server socket bound to a specific port
-            ServerSocket serverSocket = new ServerSocket(5000);
-            System.out.println("Server started. Listening for client connections...");
+
+    public static void launch() {
+
+        int port = 9000;
+
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
+
+            System.out.println("Server is listening on port " + port);
 
             while (true) {
-                // Accept incoming client connections
-                Socket clientSocket = serverSocket.accept();
-                System.out.println("Client connected: " + clientSocket.getInetAddress().getHostAddress());
+                Socket socket = serverSocket.accept();
 
-                // Create input and output streams for the client
-                BufferedReader in = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
-                PrintWriter out = new PrintWriter(clientSocket.getOutputStream(), true);
+                InputStream input = socket.getInputStream();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(input));
 
-                // Read data from the client
-                String message = in.readLine();
-                System.out.println("Received message from client: " + message);
+                OutputStream output = socket.getOutputStream();
+                PrintWriter writer = new PrintWriter(output, true);
 
-                // Process the data (e.g., perform business logic)
-                String response = "Server: Received your message: " + message;
-
-                // Send response back to the client
-                out.println(response);
-
-                // Close client socket
-                clientSocket.close();
-                System.out.println("Client disconnected.");
+                writer.println("OK");
             }
-        } catch (IOException e) {
-            e.printStackTrace();
+
+        } catch (IOException ex) {
+            System.out.println("Server exception: " + ex.getMessage());
+            ex.printStackTrace();
         }
     }
 }
