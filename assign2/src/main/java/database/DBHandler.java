@@ -11,21 +11,29 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class DBHandler {
     Path path = Paths.get("src/main/java/database/users.csv");
+    private static final ReadWriteLock rwLock = new ReentrantReadWriteLock();
 
     public boolean createUser(String username, String password) {
         List<List<String>> allLines;
+        rwLock.readLock().lock();
         try {
-            List<String> all = Files.readAllLines(path);
-            allLines = all.stream().map(line -> {
-                return List.of(line.split(","));
-            }).toList();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            try {
+                List<String> all = Files.readAllLines(path);
+                allLines = all.stream().map(line -> {
+                    return List.of(line.split(","));
+                }).toList();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } finally {
+            rwLock.readLock().unlock();
         }
 
         if (allLines.size()>0 && userExists(allLines, username))
@@ -35,18 +43,24 @@ public class DBHandler {
                 .map(this::escapeSpecialCharacters)
                 .collect(Collectors.joining(","));
 
-        File dbFile = new File(path.toUri());
+        rwLock.writeLock().lock();
+        try {
+            File dbFile = new File(path.toUri());
 
-        try (PrintWriter pw = new PrintWriter(dbFile)) {
-            for(List<String> line : allLines) {
-                pw.println(String.join(",", line));
+            try (PrintWriter pw = new PrintWriter(dbFile)) {
+                for(List<String> line : allLines) {
+                    pw.println(String.join(",", line));
+                }
+                pw.println(information);
+            } catch (FileNotFoundException e) {
+                throw new RuntimeException(e);
             }
-            pw.println(information);
-        } catch (FileNotFoundException e) {
-            throw new RuntimeException(e);
+
+            return true;
+        } finally {
+            rwLock.writeLock().unlock();
         }
 
-        return true;
     }
 
     private boolean userExists(List<List<String>> lines, String username) {
@@ -60,22 +74,29 @@ public class DBHandler {
     }
 
     public String getUserPassword(String username) {
-        List<List<String>> allLines;
+        rwLock.readLock().lock();
         try {
-            List<String> all = Files.readAllLines(path);
-            allLines = all.stream().map(line -> {
-                return List.of(line.split(","));
-            }).toList();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+            List<List<String>> allLines;
 
-        for (List<String> line: allLines) {
-            if (line.get(1).equals(username)) {
-                return line.get(2);
+            try {
+                List<String> all = Files.readAllLines(path);
+                allLines = all.stream().map(line -> {
+                    return List.of(line.split(","));
+                }).toList();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
+
+            for (List<String> line: allLines) {
+                if (line.get(1).equals(username)) {
+                    return line.get(2);
+                }
+            }
+            return null;
+
+        } finally {
+            rwLock.readLock().unlock();
         }
-        return null;
     }
 
 

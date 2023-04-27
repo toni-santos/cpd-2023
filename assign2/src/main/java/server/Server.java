@@ -18,8 +18,10 @@ public class Server {
 
     private Selector selector;
     private Map<SocketChannel, String> clients;
+    private Authentication auth;
 
     public Server() throws IOException {
+        this.auth = new Authentication();
         int PORT = 9000;
         this.clients = new HashMap<>();
         this.selector = Selector.open();
@@ -81,7 +83,6 @@ public class Server {
                     write(socketChannel, response);
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
-                    System.out.println(response);
                     write(socketChannel, response);
                 }
             default:
@@ -126,12 +127,11 @@ public class Server {
     }
 
     private boolean logInAttempt(String username, String password) {
-        Authentication auth = new Authentication();
         return auth.auth(username, password);
     }
 
     private boolean registerAttempt(String username, String password) {
-        Authentication auth = new Authentication();
+
         return auth.create(username, password);
     }
 }
