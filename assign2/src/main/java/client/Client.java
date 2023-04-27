@@ -5,13 +5,10 @@ import server.ServerCodes;
 import java.net.*;
 import java.io.*;
 import java.nio.ByteBuffer;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.Scanner;
-
-import static server.ServerCodes.OK;
+import java.util.*;
 
 /**
  * This program demonstrates a simple TCP/IP socket client.
@@ -23,15 +20,18 @@ public class Client {
     private final String HOSTNAME = "localhost";
     private final int PORT = 9000;
     private String user;
+    private SocketChannel socketChannel;
+
+    public Client() throws IOException {
+        this.socketChannel = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
+        socketChannel.configureBlocking(true);
+    }
 
     public void run() throws IOException {
-        SocketChannel socketChannel = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
-        socketChannel.configureBlocking(false);
-
         Scanner consoleInput = new Scanner(System.in);
 
         if (socketChannel.isConnected()) {
-            logInRegister(consoleInput, socketChannel);
+            logInRegister(consoleInput);
         }
         socketChannel.close();
     }
@@ -41,7 +41,7 @@ public class Client {
         client.run();
     }
 
-    private boolean logInRegister(Scanner consoleInput, SocketChannel socketChannel) throws IOException {
+    private boolean logInRegister(Scanner consoleInput) throws IOException {
         int opt = logInRegisterSelection(consoleInput);
         List<String> creds = getUserCredentials(consoleInput);
 
@@ -51,17 +51,16 @@ public class Client {
             creds.add(0, String.valueOf(ServerCodes.REG));
         }
 
-        socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+        this.socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = socketChannel.read(buffer);
+        int bytesRead = this.socketChannel.read(buffer);
         if (bytesRead == -1) {
             return false;
         }
         String rawMessage = new String(buffer.array()).trim();
-        System.out.println(rawMessage);
         ServerCodes result = ServerCodes.valueOf(rawMessage);
 
-        if (result == OK) {
+        if (result == ServerCodes.OK) {
             if (opt == 1) {
                 System.out.println("Login successful!");
             } else {
@@ -69,7 +68,7 @@ public class Client {
             }
         } else {
             System.out.println("Login/register failed!");
-            return logInRegister(consoleInput, socketChannel);
+            return logInRegister(consoleInput);
         }
         return true;
     }

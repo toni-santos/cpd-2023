@@ -48,7 +48,13 @@ public class Server {
     private void read(SelectionKey key) throws IOException {
         SocketChannel socketChannel = (SocketChannel) key.channel();
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = socketChannel.read(buffer);
+        int bytesRead = 0;
+        try {
+            bytesRead = socketChannel.read(buffer);
+        } catch (SocketException e) {
+            socketChannel.close();
+            return;
+        }
         if (bytesRead == -1) {
             disconnect(socketChannel);
             return;
@@ -62,32 +68,29 @@ public class Server {
                 if (logInAttempt(message.get(1), message.get(2))) {
                     String response = String.valueOf(ServerCodes.OK);
                     clients.put(socketChannel, message.get(1));
-                    write(key, response);
+                    write(socketChannel, response);
                 } else {
-                    System.out.println("error :D");
                     String response = String.valueOf(ServerCodes.ERR);
-                    write(key, response);
+                    write(socketChannel, response);
                 }
                 break;
             case REG:
                 if (registerAttempt(message.get(1), message.get(2))) {
                     String response = String.valueOf(ServerCodes.OK);
                     clients.put(socketChannel, message.get(1));
-                    write(key, response);
+                    write(socketChannel, response);
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
                     System.out.println(response);
-                    write(key, response);
+                    write(socketChannel, response);
                 }
             default:
                 break;
         }
     }
 
-    private void write(SelectionKey key, String response) throws IOException {
+    private void write(SocketChannel socketChannel, String response) throws IOException {
         ByteBuffer buffer = ByteBuffer.wrap(response.getBytes());
-        SocketChannel socketChannel = (SocketChannel) key.channel();
-
         socketChannel.write(buffer);
     }
 
