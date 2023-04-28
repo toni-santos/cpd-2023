@@ -7,6 +7,7 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
+import java.security.KeyStore;
 import java.util.*;
 
 /**
@@ -19,31 +20,99 @@ public class Server {
     private Selector selector;
     private Map<SocketChannel, String> clients;
     private Authentication auth;
+    private SocketChannel matchmaking;
+    private Matchmaking mmServer;
 
     public Server() throws IOException {
+        // Start matchmaking server
+        this.mmServer = new Matchmaking();
+
+        new Thread(() -> {
+            System.out.println("Started Matchmaking thread!");
+            try {
+                mmServer.run();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
+
+        // Start main server
         this.auth = new Authentication();
-        int PORT = 9000;
         this.clients = new HashMap<>();
         this.selector = Selector.open();
+
         ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
-        serverSocketChannel.bind(new InetSocketAddress(PORT));
+        serverSocketChannel.bind(new InetSocketAddress("localhost" , 9000));
         serverSocketChannel.configureBlocking(false);
         serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
-        System.out.println("Server is listening on port " + PORT);
+        System.out.println("Server is listening on port 9000");
+
+        // Connect to matchmaking server
+        this.matchmaking = SocketChannel.open(new InetSocketAddress("localhost", 9001));
+        this.matchmaking.configureBlocking(true);
     }
 
     public void run() throws IOException {
+        // Create a thread to check for matches and creates separate threads for them from a thread pool
+        new Thread(() -> {
+            try {
+                while (true) {
+                    checkMatchmaking();
+                }
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        }).start();
+
         while (true) {
             selector.select();
             Set<SelectionKey> keys = selector.selectedKeys();
-             for (SelectionKey key : keys) {
+            for (SelectionKey key : keys) {
                  if (key == null) continue;
                  if (key.isAcceptable()) {
                      accept(key);
                  } else if (key.isReadable()) {
                      read(key);
                  }
-             }
+            }
+        }
+    }
+
+    private void checkMatchmaking() throws IOException {
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        int bytesRead = matchmaking.read(buffer);
+        System.out.println("bytesRead = " + bytesRead);
+        if (bytesRead == 0) return;
+
+        if (bytesRead == -1) {
+            matchmaking.close();
+            return;
+        }
+
+        String rawMessage = new String(buffer.array()).trim();
+        List<String> message = List.of(rawMessage.split(","));
+
+        ServerCodes code = ServerCodes.valueOf(message.get(0));
+
+        switch (code) {
+            case N1:
+                List<String> players = Arrays.asList(message.get(1), message.get(2));
+                alertPlayers(players);
+                break;
+            case N2:
+            case R1:
+            case R2:
+            default:
+        }
+    }
+
+    private void alertPlayers(List<String> players) throws IOException {
+        for (String player: players) {
+            for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
+                if (socketPlayer.getValue().equals(player)) {
+                    write(socketPlayer.getKey(), String.valueOf(ServerCodes.OK));
+                }
+            }
         }
     }
 
@@ -51,16 +120,23 @@ public class Server {
         SocketChannel socketChannel = (SocketChannel) key.channel();
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         int bytesRead = 0;
+
         try {
             bytesRead = socketChannel.read(buffer);
         } catch (SocketException e) {
             socketChannel.close();
             return;
         }
+
         if (bytesRead == -1) {
             disconnect(socketChannel);
             return;
         }
+
+        if (bytesRead == 0) {
+            return;
+        }
+
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
         ServerCodes code = ServerCodes.valueOf(message.get(0));
@@ -85,9 +161,18 @@ public class Server {
                     String response = String.valueOf(ServerCodes.ERR);
                     write(socketChannel, response);
                 }
+            case N1:
+                String user = clients.get(socketChannel);
+                String elo = auth.getPlayerElo(user);
+                joinMatchmaking(ServerCodes.N1, user, elo);
             default:
                 break;
         }
+    }
+
+    private void joinMatchmaking(ServerCodes code, String user, String elo) throws IOException {
+        String playerInfo = code + "," + user + "," + elo;
+        this.matchmaking.write(ByteBuffer.wrap(playerInfo.getBytes()));
     }
 
     private void write(SocketChannel socketChannel, String response) throws IOException {
@@ -123,6 +208,7 @@ public class Server {
 
     public static void launch() throws IOException {
         Server server = new Server();
+
         server.run();
     }
 

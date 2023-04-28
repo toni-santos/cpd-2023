@@ -99,6 +99,32 @@ public class DBHandler {
         }
     }
 
+    public String getElo(String username) {
+        rwLock.readLock().lock();
+        try {
+            List<List<String>> allLines;
+
+            try {
+                List<String> all = Files.readAllLines(path);
+                allLines = all.stream().map(line -> {
+                    return List.of(line.split(","));
+                }).toList();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+
+            for (List<String> line: allLines) {
+                if (line.get(1).equals(username)) {
+                    return line.get(3);
+                }
+            }
+            return null;
+
+        } finally {
+            rwLock.readLock().unlock();
+        }
+    }
+
 
     public String escapeSpecialCharacters(String str) {
         String escaped = str.replaceAll("\\R", " ");

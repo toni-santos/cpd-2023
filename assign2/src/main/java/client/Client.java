@@ -22,14 +22,16 @@ public class Client {
 
     public Client() throws IOException {
         this.socketChannel = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
-        socketChannel.configureBlocking(true);
+        this.socketChannel.configureBlocking(true);
     }
 
     public void run() throws IOException {
         Scanner consoleInput = new Scanner(System.in);
 
         if (socketChannel.isConnected()) {
-            logInRegister(consoleInput);
+            if (logInRegister(consoleInput)) {
+                chooseGameMode(consoleInput);
+            }
         }
         socketChannel.close();
     }
@@ -50,6 +52,7 @@ public class Client {
         }
 
         this.socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         int bytesRead = this.socketChannel.read(buffer);
         if (bytesRead == -1) {
@@ -64,11 +67,58 @@ public class Client {
             } else {
                 System.out.println("Register successful!");
             }
+            this.user = creds.get(1);
         } else {
             System.out.println("Login/register failed!");
             return logInRegister(consoleInput);
         }
         return true;
+    }
+
+    private boolean chooseGameMode(Scanner consoleInput) throws IOException {
+        int opt = gameModeSelection(consoleInput);
+        switch (opt) {
+            case 1:
+                search("N" + opt);
+            case 5:
+                return false;
+        }
+        return true;
+    }
+
+    private void search(String gamemode) throws IOException {
+        String req = gamemode + "," + this.user;
+        socketChannel.write(ByteBuffer.wrap(req.getBytes()));
+
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        int bytesRead = this.socketChannel.read(buffer);
+        if (bytesRead == -1) {
+            return;
+        }
+
+        String rawMessage = new String(buffer.array()).trim();
+        ServerCodes result = ServerCodes.valueOf(rawMessage);
+
+        System.out.println(result);
+    }
+
+    private int gameModeSelection(Scanner consoleInput) {
+        System.out.print("Welcome " + this.user + "!\n" +
+                "What would you like to do?\n" +
+                "1. 1v1 Normal\n" +
+                "5. Quit\n" +
+                "- ");
+        int opt = consoleInput.nextInt();
+
+        switch (opt) {
+            case 1, 5 -> {
+                return opt;
+            }
+            default -> {
+                System.out.println("Invalid input, try again!");
+                return logInRegisterSelection(consoleInput);
+            }
+        }
     }
 
     private List<String> getUserCredentials(Scanner consoleInput) {

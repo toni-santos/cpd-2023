@@ -23,7 +23,10 @@ public class Authentication {
 
     public boolean create(String username, String password) {
         // block reads/writes here
-        DBHandler dbHandler = new DBHandler();
         return dbHandler.createUser(username, password);
+    }
+
+    public String getPlayerElo(String username) {
+        return dbHandler.getElo(username);
     }
 }
