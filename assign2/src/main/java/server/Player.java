@@ -1,13 +1,25 @@
 package server;
 
+import java.nio.channels.SocketChannel;
+
 public class Player {
-    String player;
-    String ELO;
-    ServerCodes gamemode;
+    private final SocketChannel socketChannel;
+    private String player;
+    private String ELO;
+    private ServerCodes gamemode;
+
     public Player(String player, String ELO, ServerCodes gamemode) {
         this.player = player;
         this.ELO = ELO;
         this.gamemode = gamemode;
+        this.socketChannel = null;
+    }
+
+    public Player(String player, SocketChannel socketChannel) {
+        this.player = player;
+        this.socketChannel = socketChannel;
+        this.ELO = null;
+        this.gamemode = null;
     }
 
     public String getPlayer() {
@@ -21,4 +33,9 @@ public class Player {
     public ServerCodes getGamemode() {
         return gamemode;
     }
+
+    public SocketChannel getSocketChannel() {
+        return socketChannel;
+    }
+
 }

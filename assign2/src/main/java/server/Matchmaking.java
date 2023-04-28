@@ -39,19 +39,19 @@ public class Matchmaking {
                     read();
                 }
             }
-            System.out.println(this.normal1v1);
+
             if (this.normal1v1.size() >= 2) {
-                gameFound(normal1v1);
+                gameFound(normal1v1, ServerCodes.N1);
             }
         }
     }
 
-    private void gameFound(List<Player> game) throws IOException {
+    private void gameFound(List<Player> game, ServerCodes gamemode) throws IOException {
         String player1 = game.get(0).getPlayer();
         String player2 = game.get(1).getPlayer();
         game.remove(0);
         game.remove(0);
-        String response = ServerCodes.N1 + "," +  player1 + "," + player2;
+        String response = gamemode + "," +  player1 + "," + player2;
         mainServer.write(ByteBuffer.wrap(response.getBytes()));
     }
 

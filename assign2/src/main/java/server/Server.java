@@ -1,5 +1,7 @@
 package server;
 
+import game.Game;
+
 import java.io.*;
 import java.net.*;
 import java.nio.ByteBuffer;
@@ -7,8 +9,9 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.security.KeyStore;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * This program demonstrates a simple TCP/IP socket server.
@@ -22,6 +25,7 @@ public class Server {
     private Authentication auth;
     private SocketChannel matchmaking;
     private Matchmaking mmServer;
+    private ExecutorService threadPool;
 
     public Server() throws IOException {
         // Start matchmaking server
@@ -50,6 +54,8 @@ public class Server {
         // Connect to matchmaking server
         this.matchmaking = SocketChannel.open(new InetSocketAddress("localhost", 9001));
         this.matchmaking.configureBlocking(true);
+
+        this.threadPool = Executors.newFixedThreadPool(5);
     }
 
     public void run() throws IOException {
@@ -96,23 +102,34 @@ public class Server {
 
         switch (code) {
             case N1:
-                List<String> players = Arrays.asList(message.get(1), message.get(2));
-                alertPlayers(players);
+                List<String> playerIDs = Arrays.asList(message.get(1), message.get(2));
+                List<Player> players = getGamePlayers(playerIDs);
+                alertGameFound(players);
+                Game game = new Game(players);
+                threadPool.submit(game);
                 break;
             case N2:
             case R1:
             case R2:
-            default:
         }
     }
 
-    private void alertPlayers(List<String> players) throws IOException {
+    private List<Player> getGamePlayers(List<String> players) throws IOException {
+        List<Player> playerInfo = new ArrayList<Player>();
         for (String player: players) {
             for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
                 if (socketPlayer.getValue().equals(player)) {
-                    write(socketPlayer.getKey(), String.valueOf(ServerCodes.OK));
+                    playerInfo.add(new Player(player, socketPlayer.getKey()));
                 }
             }
+        }
+
+        return playerInfo;
+    }
+
+    private void alertGameFound(List<Player> players) throws IOException {
+        for (Player player: players) {
+            write(player.getSocketChannel(), String.valueOf(ServerCodes.GF));
         }
     }
 
@@ -213,6 +230,11 @@ public class Server {
     }
 
     private boolean logInAttempt(String username, String password) {
+        for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
+            if (socketPlayer.getValue().equals(username)) {
+                return false;
+            }
+        }
         return auth.auth(username, password);
     }
 

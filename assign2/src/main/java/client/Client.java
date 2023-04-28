@@ -30,10 +30,15 @@ public class Client {
 
         if (socketChannel.isConnected()) {
             if (logInRegister(consoleInput)) {
-                chooseGameMode(consoleInput);
+                if (chooseGameMode(consoleInput)) {
+                    gameLoop(consoleInput);
+                }
             }
         }
         socketChannel.close();
+    }
+
+    private void gameLoop(Scanner consoleInput) {
     }
 
     public static void launch() throws IOException {
@@ -43,12 +48,16 @@ public class Client {
 
     private boolean logInRegister(Scanner consoleInput) throws IOException {
         int opt = logInRegisterSelection(consoleInput);
+
+        if (opt == 3) {
+            return false;
+        }
+
         List<String> creds = getUserCredentials(consoleInput);
 
-        if (opt == 1) {
-            creds.add(0, String.valueOf(ServerCodes.LOG));
-        } else {
-            creds.add(0, String.valueOf(ServerCodes.REG));
+        switch (opt) {
+            case 1 -> creds.add(0, String.valueOf(ServerCodes.LOG));
+            case 2 -> creds.add(0, String.valueOf(ServerCodes.REG));
         }
 
         this.socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
@@ -87,6 +96,8 @@ public class Client {
     }
 
     private void search(String gamemode) throws IOException {
+        System.out.println("Searching...");
+
         String req = gamemode + "," + this.user;
         socketChannel.write(ByteBuffer.wrap(req.getBytes()));
 
@@ -99,7 +110,11 @@ public class Client {
         String rawMessage = new String(buffer.array()).trim();
         ServerCodes result = ServerCodes.valueOf(rawMessage);
 
-        System.out.println(result);
+        if (result == ServerCodes.GF) {
+            System.out.println("Game found! Waiting for lobby...");
+        } else {
+            System.out.println("Something went wrong!");
+        }
     }
 
     private int gameModeSelection(Scanner consoleInput) {
@@ -149,12 +164,12 @@ public class Client {
 
 
     private int logInRegisterSelection(Scanner consoleInput) {
-        System.out.print("1. Log In\n2. Register\n- ");
+        System.out.print("1. Log In\n2. Register\n3. Quit\n- ");
 
         int opt = consoleInput.nextInt();
 
         switch (opt) {
-            case 1, 2 -> {
+            case 1, 2, 3 -> {
                 return opt;
             }
             default -> {
