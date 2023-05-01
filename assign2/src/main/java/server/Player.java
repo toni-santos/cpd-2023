@@ -15,6 +15,13 @@ public class Player {
         this.socketChannel = null;
     }
 
+    public Player(String player, String ELO, ServerCodes gamemode, SocketChannel socketChannel) {
+        this.player = player;
+        this.ELO = ELO;
+        this.gamemode = gamemode;
+        this.socketChannel = socketChannel;
+    }
+
     public Player(String player, SocketChannel socketChannel) {
         this.player = player;
         this.socketChannel = socketChannel;

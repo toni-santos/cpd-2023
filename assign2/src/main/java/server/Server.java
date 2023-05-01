@@ -12,6 +12,9 @@ import java.nio.channels.SocketChannel;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * This program demonstrates a simple TCP/IP socket server.
@@ -20,17 +23,22 @@ import java.util.concurrent.Executors;
  */
 public class Server {
 
+    private static final ReadWriteLock clientsLock = new ReentrantReadWriteLock();
+    private static final ReadWriteLock N1Lock = new ReentrantReadWriteLock();
     private Selector selector;
     private Map<SocketChannel, String> clients;
     private Authentication auth;
     private SocketChannel matchmaking;
     private Matchmaking mmServer;
     private ExecutorService threadPool;
+    private List<Player> normal1v1 = new ArrayList<Player>();
+    private List<String> gamePorts = new ArrayList<String>();
+    private Map<Future<?>, String> runningGames = new HashMap<>();
 
     public Server() throws IOException {
+        /*
         // Start matchmaking server
         this.mmServer = new Matchmaking();
-
         new Thread(() -> {
             System.out.println("Started Matchmaking thread!");
             try {
@@ -39,6 +47,11 @@ public class Server {
                 throw new RuntimeException(e);
             }
         }).start();
+
+        // Connect to matchmaking server
+        this.matchmaking = SocketChannel.open(new InetSocketAddress("localhost", 9001));
+        this.matchmaking.configureBlocking(true);
+        */
 
         // Start main server
         this.auth = new Authentication();
@@ -51,24 +64,27 @@ public class Server {
         serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
         System.out.println("Server is listening on port 9000");
 
-        // Connect to matchmaking server
-        this.matchmaking = SocketChannel.open(new InetSocketAddress("localhost", 9001));
-        this.matchmaking.configureBlocking(true);
+        // Start thread pool
+        int maxGames = 5;
 
-        this.threadPool = Executors.newFixedThreadPool(5);
+        this.threadPool = Executors.newFixedThreadPool(maxGames);
+
+        for (int i = 0; i < maxGames; i++) {
+            gamePorts.add(String.valueOf(10000+i));
+        }
     }
 
     public void run() throws IOException {
         // Create a thread to check for matches and creates separate threads for them from a thread pool
         new Thread(() -> {
             try {
-                while (true) {
-                    checkMatchmaking();
-                }
-            } catch (IOException e) {
+                checkMatchmaking();
+            } catch (IOException | InterruptedException e) {
                 throw new RuntimeException(e);
             }
         }).start();
+
+        new Thread(this::checkGameEnd).start();
 
         while (true) {
             selector.select();
@@ -84,7 +100,76 @@ public class Server {
         }
     }
 
-    private void checkMatchmaking() throws IOException {
+    private void checkGameEnd() {
+        while (true) {
+            for (Map.Entry<Future<?>, String> game: runningGames.entrySet()) {
+                if (game.getKey().isDone()) {
+                    String port = game.getValue();
+                    gamePorts.add(port);
+                    runningGames.remove(game);
+                }
+            }
+        }
+    }
+
+    private void checkMatchmaking() throws IOException, InterruptedException {
+        while (true) {
+            boolean N1Game = false, N2Game, R1Game, R2Game;
+            List<Player> N1Players = new ArrayList<>();
+            N1Lock.readLock().lock();
+            try {
+                if (normal1v1.size() >= 2) {
+                    N1Game = true;
+                    Player player1 = normal1v1.get(0);
+                    Player player2 = normal1v1.get(1);
+                    N1Players = Arrays.asList(player1, player2);
+                }
+            } finally {
+                N1Lock.readLock().unlock();
+            }
+
+            if (N1Game) {
+                N1Lock.writeLock().lock();
+                try {
+                    normal1v1.remove(0);
+                    normal1v1.remove(0);
+                } finally {
+                    N1Lock.writeLock().unlock();
+                }
+                startGame(ServerCodes.N1, N1Players);
+            }
+            /*
+            try {
+                if (normal1v1.size() >= 2) {
+                    Player player1 = normal1v1.get(0);
+                    Player player2 = normal1v1.get(1);
+                    N1Lock.writeLock().lock();
+                    try {
+                        normal1v1.remove(0);
+                        normal1v1.remove(0);
+                    } finally {
+                        N1Lock.writeLock().unlock();
+                    }
+                    List<Player> players = Arrays.asList(player1, player2);
+                    while (gamePorts.size() == 0) {
+                        Thread.sleep(500);
+                    }
+                    String port = gamePorts.get(0);
+                    gamePorts.remove(0);
+                    alertGameFound(players, port);
+                    Game game = new Game(players, port);
+                    Future<?> gameFuture = threadPool.submit(game);
+                    runningGames.put(gameFuture, port);
+                }
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            } finally {
+                N1Lock.readLock().unlock();
+                N1Lock.writeLock().unlock();
+            }
+            System.out.println("bye");*/
+        }
+        /*
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         int bytesRead = matchmaking.read(buffer);
         System.out.println("bytesRead = " + bytesRead);
@@ -99,37 +184,68 @@ public class Server {
         List<String> message = List.of(rawMessage.split(","));
 
         ServerCodes code = ServerCodes.valueOf(message.get(0));
-
         switch (code) {
             case N1:
                 List<String> playerIDs = Arrays.asList(message.get(1), message.get(2));
                 List<Player> players = getGamePlayers(playerIDs);
-                alertGameFound(players);
                 Game game = new Game(players);
+                alertGameFound(players);
                 threadPool.submit(game);
                 break;
             case N2:
             case R1:
             case R2:
         }
+        */
     }
 
-    private List<Player> getGamePlayers(List<String> players) throws IOException {
+    private void startGame(ServerCodes gamemode, List<Player> playerList) throws InterruptedException, IOException {
+        switch (gamemode) {
+            case N1 -> {
+                while (gamePorts.size() == 0) {
+                    Thread.sleep(500);
+                }
+                String port = gamePorts.get(0);
+                gamePorts.remove(0);
+                alertGameFound(playerList, port);
+                Game game = new Game(playerList, port);
+                Future<?> gameFuture = threadPool.submit(game);
+                runningGames.put(gameFuture, port);
+            }
+        }
+    }
+
+    /*private List<Player> getGamePlayers(List<String> players) throws IOException {
         List<Player> playerInfo = new ArrayList<Player>();
-        for (String player: players) {
-            for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
-                if (socketPlayer.getValue().equals(player)) {
-                    playerInfo.add(new Player(player, socketPlayer.getKey()));
+
+        clientsLock.writeLock().lock();
+        clientsLock.readLock().lock();
+        try {
+            for (String player: players) {
+                for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
+                    if (socketPlayer.getValue().equals(player)) {
+                        playerInfo.add(new Player(player, socketPlayer.getKey()));
+                    }
                 }
             }
+        } finally {
+            clientsLock.writeLock().unlock();
+            clientsLock.readLock().unlock();
         }
 
         return playerInfo;
     }
 
-    private void alertGameFound(List<Player> players) throws IOException {
+    private void joinMatchmaking(ServerCodes code, String user, String elo) throws IOException {
+        String playerInfo = code + "," + user + "," + elo;
+        this.matchmaking.write(ByteBuffer.wrap(playerInfo.getBytes()));
+    }
+    */
+
+    private void alertGameFound(List<Player> players, String port) throws IOException {
+        String str = ServerCodes.GF + "," + port;
         for (Player player: players) {
-            write(player.getSocketChannel(), String.valueOf(ServerCodes.GF));
+            write(player.getSocketChannel(), str);
         }
     }
 
@@ -162,7 +278,12 @@ public class Server {
             case LOG:
                 if (logInAttempt(message.get(1), message.get(2))) {
                     String response = String.valueOf(ServerCodes.OK);
-                    clients.put(socketChannel, message.get(1));
+                    clientsLock.writeLock().lock();
+                    try {
+                        clients.put(socketChannel, message.get(1));
+                    } finally {
+                        clientsLock.writeLock().unlock();
+                    }
                     write(socketChannel, response);
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
@@ -172,24 +293,37 @@ public class Server {
             case REG:
                 if (registerAttempt(message.get(1), message.get(2))) {
                     String response = String.valueOf(ServerCodes.OK);
-                    clients.put(socketChannel, message.get(1));
+                    clientsLock.writeLock().lock();
+                    try {
+                        clients.put(socketChannel, message.get(1));
+                    } finally {
+                        clientsLock.writeLock().unlock();
+                    }
                     write(socketChannel, response);
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
                     write(socketChannel, response);
                 }
             case N1:
-                String user = clients.get(socketChannel);
-                String elo = auth.getPlayerElo(user);
-                joinMatchmaking(ServerCodes.N1, user, elo);
+                clientsLock.readLock().lock();
+                try {
+                    String user = clients.get(socketChannel);
+                    String elo = auth.getPlayerElo(user);
+
+                    // Lock 1v1 list
+                    N1Lock.writeLock().lock();
+                    try {
+                        normal1v1.add(new Player(user, elo, ServerCodes.N1, socketChannel));
+                    } finally {
+                        // unlock 1v1 list
+                        N1Lock.writeLock().unlock();
+                    }
+                } finally {
+                    clientsLock.readLock().unlock();
+                }
             default:
                 break;
         }
-    }
-
-    private void joinMatchmaking(ServerCodes code, String user, String elo) throws IOException {
-        String playerInfo = code + "," + user + "," + elo;
-        this.matchmaking.write(ByteBuffer.wrap(playerInfo.getBytes()));
     }
 
     private void write(SocketChannel socketChannel, String response) throws IOException {
@@ -198,8 +332,16 @@ public class Server {
     }
 
     private void disconnect(SocketChannel socketChannel) throws IOException {
-        String clientName = clients.get(socketChannel);
-        clients.remove(socketChannel);
+        String clientName;
+        clientsLock.readLock().lock();
+        clientsLock.writeLock().lock();
+        try {
+            clientName = clients.get(socketChannel);
+            clients.remove(socketChannel);
+        } finally {
+            clientsLock.readLock().unlock();
+            clientsLock.writeLock().unlock();
+        }
         System.out.println("Client " + clientName + " disconnected");
         socketChannel.close();
     }
@@ -210,7 +352,12 @@ public class Server {
         if (socketChannel == null) return;
         socketChannel.configureBlocking(false);
         socketChannel.register(selector, SelectionKey.OP_READ);
-        this.clients.put(socketChannel, "");
+        clientsLock.writeLock().lock();
+        try {
+            this.clients.put(socketChannel, "");
+        } finally {
+            clientsLock.writeLock().unlock();
+        }
         System.out.println("Client " + socketChannel.getRemoteAddress() + " connected");
     }
 
@@ -230,11 +377,17 @@ public class Server {
     }
 
     private boolean logInAttempt(String username, String password) {
-        for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
-            if (socketPlayer.getValue().equals(username)) {
-                return false;
+        clientsLock.readLock().lock();
+        try {
+            for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
+                if (socketPlayer.getValue().equals(username)) {
+                    return false;
+                }
             }
+        } finally {
+            clientsLock.readLock().unlock();
         }
+
         return auth.auth(username, password);
     }
 

@@ -18,27 +18,40 @@ public class Client {
     private final String HOSTNAME = "localhost";
     private final int PORT = 9000;
     private String user;
-    private SocketChannel socketChannel;
+    private SocketChannel serverSocket;
+    private SocketChannel gameSocket;
 
     public Client() throws IOException {
-        this.socketChannel = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
-        this.socketChannel.configureBlocking(true);
+        this.serverSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
+        this.serverSocket.configureBlocking(true);
     }
 
     public void run() throws IOException {
         Scanner consoleInput = new Scanner(System.in);
 
-        if (socketChannel.isConnected()) {
+        if (serverSocket.isConnected()) {
             if (logInRegister(consoleInput)) {
-                if (chooseGameMode(consoleInput)) {
-                    gameLoop(consoleInput);
+                int port = chooseGameMode(consoleInput);
+                if (port != -1) {
+                    connectToGameServer(port);
+                    while (true) {
+                        gameLoop(consoleInput);
+                    }
                 }
             }
         }
-        socketChannel.close();
+        serverSocket.close();
     }
 
-    private void gameLoop(Scanner consoleInput) {
+    private void connectToGameServer(int port) throws IOException {
+        this.gameSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, port));
+        this.gameSocket.configureBlocking(true);
+    }
+
+    private void gameLoop(Scanner consoleInput) throws IOException {
+        System.out.println("Talk back: ");
+        String res = consoleInput.next();
+        gameSocket.write(ByteBuffer.wrap(res.getBytes()));
     }
 
     public static void launch() throws IOException {
@@ -60,10 +73,10 @@ public class Client {
             case 2 -> creds.add(0, String.valueOf(ServerCodes.REG));
         }
 
-        this.socketChannel.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+        this.serverSocket.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
 
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = this.socketChannel.read(buffer);
+        int bytesRead = this.serverSocket.read(buffer);
         if (bytesRead == -1) {
             return false;
         }
@@ -84,37 +97,41 @@ public class Client {
         return true;
     }
 
-    private boolean chooseGameMode(Scanner consoleInput) throws IOException {
+    private int chooseGameMode(Scanner consoleInput) throws IOException {
         int opt = gameModeSelection(consoleInput);
         switch (opt) {
             case 1:
-                search("N" + opt);
+                return search("N" + opt);
             case 5:
-                return false;
+                return -1;
         }
-        return true;
+        return -1;
     }
 
-    private void search(String gamemode) throws IOException {
+    private int search(String gamemode) throws IOException {
         System.out.println("Searching...");
 
         String req = gamemode + "," + this.user;
-        socketChannel.write(ByteBuffer.wrap(req.getBytes()));
+        serverSocket.write(ByteBuffer.wrap(req.getBytes()));
 
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = this.socketChannel.read(buffer);
+        int bytesRead = this.serverSocket.read(buffer);
         if (bytesRead == -1) {
-            return;
+            return bytesRead;
         }
 
         String rawMessage = new String(buffer.array()).trim();
-        ServerCodes result = ServerCodes.valueOf(rawMessage);
+        List<String> result = List.of(rawMessage.split(","));
+        String code = result.get(0);
+        String port = result.get(1);
 
-        if (result == ServerCodes.GF) {
+        if (code.equals(ServerCodes.GF)) {
             System.out.println("Game found! Waiting for lobby...");
+            return Integer.parseInt(port);
         } else {
             System.out.println("Something went wrong!");
         }
+        return bytesRead;
     }
 
     private int gameModeSelection(Scanner consoleInput) {
