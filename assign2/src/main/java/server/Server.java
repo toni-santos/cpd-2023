@@ -207,10 +207,10 @@ public class Server {
                 }
                 String port = gamePorts.get(0);
                 gamePorts.remove(0);
-                alertGameFound(playerList, port);
                 Game game = new Game(playerList, port);
                 Future<?> gameFuture = threadPool.submit(game);
                 runningGames.put(gameFuture, port);
+                alertGameFound(playerList, port);
             }
         }
     }

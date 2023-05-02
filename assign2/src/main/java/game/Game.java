@@ -100,6 +100,7 @@ public class Game implements Runnable {
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
         System.out.println(message);
+        // TODO: do game stuff now OuO
         /*
         ServerCodes code = ServerCodes.valueOf(message.get(0));
 

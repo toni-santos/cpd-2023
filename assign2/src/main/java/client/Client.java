@@ -44,11 +44,14 @@ public class Client {
     }
 
     private void connectToGameServer(int port) throws IOException {
+        System.out.println("port =" + port);
         this.gameSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, port));
         this.gameSocket.configureBlocking(true);
     }
 
     private void gameLoop(Scanner consoleInput) throws IOException {
+        // TODO: do game stuff now OuO
+
         System.out.println("Talk back: ");
         String res = consoleInput.next();
         gameSocket.write(ByteBuffer.wrap(res.getBytes()));
@@ -122,10 +125,10 @@ public class Client {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> result = List.of(rawMessage.split(","));
-        String code = result.get(0);
+        ServerCodes code = ServerCodes.valueOf(result.get(0));
         String port = result.get(1);
 
-        if (code.equals(ServerCodes.GF)) {
+        if (code == ServerCodes.GF) {
             System.out.println("Game found! Waiting for lobby...");
             return Integer.parseInt(port);
         } else {
