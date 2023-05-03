@@ -36,23 +36,6 @@ public class Server {
     private Map<Future<?>, String> runningGames = new HashMap<>();
 
     public Server() throws IOException {
-        /*
-        // Start matchmaking server
-        this.mmServer = new Matchmaking();
-        new Thread(() -> {
-            System.out.println("Started Matchmaking thread!");
-            try {
-                mmServer.run();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }).start();
-
-        // Connect to matchmaking server
-        this.matchmaking = SocketChannel.open(new InetSocketAddress("localhost", 9001));
-        this.matchmaking.configureBlocking(true);
-        */
-
         // Start main server
         this.auth = new Authentication();
         this.clients = new HashMap<>();
@@ -138,65 +121,7 @@ public class Server {
                 }
                 startGame(ServerCodes.N1, N1Players);
             }
-            /*
-            try {
-                if (normal1v1.size() >= 2) {
-                    Player player1 = normal1v1.get(0);
-                    Player player2 = normal1v1.get(1);
-                    N1Lock.writeLock().lock();
-                    try {
-                        normal1v1.remove(0);
-                        normal1v1.remove(0);
-                    } finally {
-                        N1Lock.writeLock().unlock();
-                    }
-                    List<Player> players = Arrays.asList(player1, player2);
-                    while (gamePorts.size() == 0) {
-                        Thread.sleep(500);
-                    }
-                    String port = gamePorts.get(0);
-                    gamePorts.remove(0);
-                    alertGameFound(players, port);
-                    Game game = new Game(players, port);
-                    Future<?> gameFuture = threadPool.submit(game);
-                    runningGames.put(gameFuture, port);
-                }
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            } finally {
-                N1Lock.readLock().unlock();
-                N1Lock.writeLock().unlock();
-            }
-            System.out.println("bye");*/
         }
-        /*
-        ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = matchmaking.read(buffer);
-        System.out.println("bytesRead = " + bytesRead);
-        if (bytesRead == 0) return;
-
-        if (bytesRead == -1) {
-            matchmaking.close();
-            return;
-        }
-
-        String rawMessage = new String(buffer.array()).trim();
-        List<String> message = List.of(rawMessage.split(","));
-
-        ServerCodes code = ServerCodes.valueOf(message.get(0));
-        switch (code) {
-            case N1:
-                List<String> playerIDs = Arrays.asList(message.get(1), message.get(2));
-                List<Player> players = getGamePlayers(playerIDs);
-                Game game = new Game(players);
-                alertGameFound(players);
-                threadPool.submit(game);
-                break;
-            case N2:
-            case R1:
-            case R2:
-        }
-        */
     }
 
     private void startGame(ServerCodes gamemode, List<Player> playerList) throws InterruptedException, IOException {
@@ -214,33 +139,6 @@ public class Server {
             }
         }
     }
-
-    /*private List<Player> getGamePlayers(List<String> players) throws IOException {
-        List<Player> playerInfo = new ArrayList<Player>();
-
-        clientsLock.writeLock().lock();
-        clientsLock.readLock().lock();
-        try {
-            for (String player: players) {
-                for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
-                    if (socketPlayer.getValue().equals(player)) {
-                        playerInfo.add(new Player(player, socketPlayer.getKey()));
-                    }
-                }
-            }
-        } finally {
-            clientsLock.writeLock().unlock();
-            clientsLock.readLock().unlock();
-        }
-
-        return playerInfo;
-    }
-
-    private void joinMatchmaking(ServerCodes code, String user, String elo) throws IOException {
-        String playerInfo = code + "," + user + "," + elo;
-        this.matchmaking.write(ByteBuffer.wrap(playerInfo.getBytes()));
-    }
-    */
 
     private void alertGameFound(List<Player> players, String port) throws IOException {
         String str = ServerCodes.GF + "," + port;
@@ -304,6 +202,7 @@ public class Server {
                     String response = String.valueOf(ServerCodes.ERR);
                     write(socketChannel, response);
                 }
+                break;
             case N1:
                 clientsLock.readLock().lock();
                 try {
@@ -321,6 +220,15 @@ public class Server {
                 } finally {
                     clientsLock.readLock().unlock();
                 }
+                break;
+            case GG:
+                System.out.println("Game ended");
+                String winner = message.get(1);
+                String loser = message.get(2);
+
+                auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
+                auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
+                break;
             default:
                 break;
         }

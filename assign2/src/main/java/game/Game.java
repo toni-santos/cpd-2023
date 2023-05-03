@@ -16,20 +16,26 @@ import java.util.Set;
 
 public class Game implements Runnable {
 
+    private final SocketChannel mainServerSocket;
     private List<Player> players;
     private String port;
     private boolean talked = false;
     private Selector selector;
+    private ServerSocketChannel serverSocketChannel;
+    private boolean gameOver = false;
 
     public Game(List<Player> players, String port) throws IOException {
         this.players = players;
         this.port = port;
         this.selector = Selector.open();
 
-        ServerSocketChannel serverSocketChannel = ServerSocketChannel.open();
-        serverSocketChannel.bind(new InetSocketAddress("localhost" , Integer.parseInt(port)));
-        serverSocketChannel.configureBlocking(false);
-        serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+        this.serverSocketChannel = ServerSocketChannel.open();
+        this.serverSocketChannel.bind(new InetSocketAddress("localhost" , Integer.parseInt(port)));
+        this.serverSocketChannel.configureBlocking(false);
+        this.serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
+        
+        this.mainServerSocket = SocketChannel.open(new InetSocketAddress("localhost", 9000));
+        this.mainServerSocket.configureBlocking(true);
 
         System.out.print("Started game server on port: " + port + "\nPlayers:");
         for (Player p : players) {
@@ -41,6 +47,9 @@ public class Game implements Runnable {
     @Override
     public void run() {
         while (true) {
+            if (gameOver) {
+                break;
+            }
             try {
                 selector.select();
             } catch (IOException e) {
@@ -63,6 +72,11 @@ public class Game implements Runnable {
                     }
                 }
             }
+        }
+        try {
+            serverSocketChannel.close();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         }
     }
 
@@ -100,6 +114,10 @@ public class Game implements Runnable {
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
         System.out.println(message);
+        if (talked) {
+            endGame(players.get(0), players.get(1));
+        }
+        talked = true;
         // TODO: do game stuff now OuO
         /*
         ServerCodes code = ServerCodes.valueOf(message.get(0));
@@ -110,6 +128,22 @@ public class Game implements Runnable {
                 break;
         }
         */
+    }
+
+    private void endGame(Player winner, Player loser) {
+        try {
+            String endGameString = ServerCodes.GG + "," + winner.getPlayer() + "," + loser.getPlayer();
+
+            for (Player p: players) {
+                disconnect(p.getSocketChannel());
+            }
+            this.gameOver = true;
+            write(mainServerSocket, endGameString);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+
     }
 
     private void write(SocketChannel socketChannel, String response) throws IOException {

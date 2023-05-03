@@ -9,6 +9,8 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
@@ -132,5 +134,44 @@ public class DBHandler {
             escaped = "\"" + str + "\"";
         }
         return escaped;
+    }
+
+    public void setPlayerElo(String username, String elo) {
+        List<List<String>> allLines;
+        rwLock.readLock().lock();
+        try {
+            try {
+                List<String> all = Files.readAllLines(path);
+                allLines = all.stream().map(line -> {
+                    return Arrays.asList(line.split(","));
+                }).toList();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } finally {
+            rwLock.readLock().unlock();
+        }
+
+        for (List<String> line: allLines) {
+            if (line.get(1).equals(username)) {
+                line.set(3, elo);
+            }
+        }
+
+        rwLock.writeLock().lock();
+        try {
+            File dbFile = new File(path.toUri());
+
+            try (PrintWriter pw = new PrintWriter(dbFile)) {
+                for(List<String> line : allLines) {
+                    pw.println(String.join(",", line));
+                }
+            } catch (FileNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+
+        } finally {
+            rwLock.writeLock().unlock();
+        }
     }
 }

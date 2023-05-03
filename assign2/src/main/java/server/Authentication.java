@@ -14,7 +14,6 @@ public class Authentication {
     }
 
     public boolean auth(String username, String password) {
-        // block reads/writes here
         String dbPassword = dbHandler.getUserPassword(username);
         if (dbPassword.equals("")) return false;
 
@@ -22,11 +21,14 @@ public class Authentication {
     }
 
     public boolean create(String username, String password) {
-        // block reads/writes here
         return dbHandler.createUser(username, password);
     }
 
     public String getPlayerElo(String username) {
         return dbHandler.getElo(username);
+    }
+    
+    public void setPlayerElo(String username, String elo ){
+        dbHandler.setPlayerElo(username, elo);
     }
 }
