@@ -12,7 +12,6 @@ import java.nio.channels.SocketChannel;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -25,15 +24,17 @@ public class Server {
 
     private static final ReadWriteLock clientsLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock N1Lock = new ReentrantReadWriteLock();
+    private static final ReadWriteLock runningGamesLock = new ReentrantReadWriteLock();
+    private static final ReadWriteLock gamePortsLock = new ReentrantReadWriteLock();
     private Selector selector;
     private Map<SocketChannel, String> clients;
     private Authentication auth;
     private SocketChannel matchmaking;
     private Matchmaking mmServer;
     private ExecutorService threadPool;
-    private List<Player> normal1v1 = new ArrayList<Player>();
-    private List<String> gamePorts = new ArrayList<String>();
-    private Map<Future<?>, String> runningGames = new HashMap<>();
+    private List<Player> normal1v1 = new ArrayList<>();
+    private List<String> gamePorts = new ArrayList<>();
+    private List<String> runningGames = new ArrayList<>();
 
     public Server() throws IOException {
         // Start main server
@@ -67,8 +68,6 @@ public class Server {
             }
         }).start();
 
-        new Thread(this::checkGameEnd).start();
-
         while (true) {
             selector.select();
             Set<SelectionKey> keys = selector.selectedKeys();
@@ -79,18 +78,6 @@ public class Server {
                  } else if (key.isReadable()) {
                      read(key);
                  }
-            }
-        }
-    }
-
-    private void checkGameEnd() {
-        while (true) {
-            for (Map.Entry<Future<?>, String> game: runningGames.entrySet()) {
-                if (game.getKey().isDone()) {
-                    String port = game.getValue();
-                    gamePorts.add(port);
-                    runningGames.remove(game);
-                }
             }
         }
     }
@@ -127,14 +114,34 @@ public class Server {
     private void startGame(ServerCodes gamemode, List<Player> playerList) throws InterruptedException, IOException {
         switch (gamemode) {
             case N1 -> {
-                while (gamePorts.size() == 0) {
-                    Thread.sleep(500);
+                // TODO: do this better
+                gamePortsLock.readLock().lock();
+                try {
+                    while (gamePorts.size() == 0) {
+                        Thread.sleep(500);
+                    }
+                } finally {
+                    gamePortsLock.readLock().unlock();
                 }
                 String port = gamePorts.get(0);
-                gamePorts.remove(0);
+
+                gamePortsLock.writeLock().lock();
+                try {
+                    gamePorts.remove(0);
+                } finally {
+                    gamePortsLock.writeLock().unlock();
+                }
+
                 Game game = new Game(playerList, port);
-                Future<?> gameFuture = threadPool.submit(game);
-                runningGames.put(gameFuture, port);
+                threadPool.submit(game);
+
+                runningGamesLock.writeLock().lock();
+                try {
+                    runningGames.add(port);
+                } finally {
+                    runningGamesLock.writeLock().unlock();
+                }
+
                 alertGameFound(playerList, port);
             }
         }
@@ -223,8 +230,24 @@ public class Server {
                 break;
             case GG:
                 System.out.println("Game ended");
-                String winner = message.get(1);
-                String loser = message.get(2);
+
+                String port = message.get(1);
+                String winner = message.get(2);
+                String loser = message.get(3);
+
+                gamePortsLock.writeLock().lock();
+                try {
+                    gamePorts.add(port);
+                } finally {
+                    gamePortsLock.writeLock().unlock();
+                }
+
+                runningGamesLock.writeLock().lock();
+                try {
+                    runningGames.remove(port);
+                } finally {
+                    runningGamesLock.writeLock().unlock();
+                }
 
                 auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
                 auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));

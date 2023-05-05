@@ -132,7 +132,7 @@ public class Game implements Runnable {
 
     private void endGame(Player winner, Player loser) {
         try {
-            String endGameString = ServerCodes.GG + "," + winner.getPlayer() + "," + loser.getPlayer();
+            String endGameString = ServerCodes.GG + "," + this.port + "," + winner.getPlayer() + "," + loser.getPlayer();
 
             for (Player p: players) {
                 disconnect(p.getSocketChannel());
