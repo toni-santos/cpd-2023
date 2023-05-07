@@ -1,6 +1,7 @@
 package client;
 
 import server.ServerCodes;
+import utils.SHA512Generator;
 
 import java.net.*;
 import java.io.*;
@@ -18,6 +19,7 @@ public class Client {
     private final String HOSTNAME = "localhost";
     private final int PORT = 9000;
     private String user;
+    private String token;
     private SocketChannel serverSocket;
     private SocketChannel gameSocket;
 
@@ -44,7 +46,6 @@ public class Client {
     }
 
     private void connectToGameServer(int port) throws IOException {
-        System.out.println("port =" + port);
         this.gameSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, port));
         this.gameSocket.configureBlocking(true);
     }
@@ -84,14 +85,15 @@ public class Client {
             return false;
         }
         String rawMessage = new String(buffer.array()).trim();
-        ServerCodes result = ServerCodes.valueOf(rawMessage);
+        List<String> message = List.of(rawMessage.split(","));
 
-        if (result == ServerCodes.OK) {
+        if (ServerCodes.OK == ServerCodes.valueOf(message.get(0))) {
             if (opt == 1) {
                 System.out.println("Login successful!");
             } else {
                 System.out.println("Register successful!");
             }
+            this.token = message.get(1);
             this.user = creds.get(1);
         } else {
             System.out.println("Login/register failed!");
@@ -106,15 +108,20 @@ public class Client {
             case 1:
                 return search("N" + opt);
             case 5:
+                disconnect();
                 return -1;
         }
         return -1;
     }
 
+    private void disconnect() throws IOException {
+        this.serverSocket.close();
+    }
+
     private int search(String gamemode) throws IOException {
         System.out.println("Searching...");
 
-        String req = gamemode + "," + this.user;
+        String req = gamemode + "," + this.token;
         serverSocket.write(ByteBuffer.wrap(req.getBytes()));
 
         ByteBuffer buffer = ByteBuffer.allocate(1024);
@@ -160,7 +167,7 @@ public class Client {
         String username = getUsername(consoleInput);
         String password = getPassword(consoleInput);
 
-        return new ArrayList<String>(Arrays.asList(username, password));
+        return new ArrayList<>(Arrays.asList(username, SHA512Generator.encrypt(password)));
     }
 
     private String getUsername(Scanner consoleInput) {

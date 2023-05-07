@@ -6,27 +6,15 @@ public class Player {
     private final SocketChannel socketChannel;
     private String player;
     private String elo;
+    private String token;
     private ServerCodes gamemode;
 
-    public Player(String player, String elo, ServerCodes gamemode) {
-        this.player = player;
-        this.elo = elo;
-        this.gamemode = gamemode;
-        this.socketChannel = null;
-    }
-
-    public Player(String player, String elo, ServerCodes gamemode, SocketChannel socketChannel) {
+    public Player(String player, String elo, ServerCodes gamemode, SocketChannel socketChannel, String token) {
         this.player = player;
         this.elo = elo;
         this.gamemode = gamemode;
         this.socketChannel = socketChannel;
-    }
-
-    public Player(String player, SocketChannel socketChannel) {
-        this.player = player;
-        this.socketChannel = socketChannel;
-        this.elo = null;
-        this.gamemode = null;
+        this.token = token;
     }
 
     public String getPlayer() {
@@ -44,5 +32,13 @@ public class Player {
     public SocketChannel getSocketChannel() {
         return socketChannel;
     }
+
+    public String getToken() {
+        return token;
+    }
+    public void setGamemode(ServerCodes gamemode) {
+        this.gamemode = gamemode;
+    }
+
 
 }

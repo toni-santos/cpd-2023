@@ -66,7 +66,7 @@ public class Matchmaking {
         String rawMessage = new String(buffer.array()).trim();
         List<String> result  = List.of(rawMessage.split(","));
         ServerCodes gamemode = ServerCodes.valueOf(result.get(0));
-        Player newPlayer = new Player(result.get(1), result.get(2), gamemode);
+        Player newPlayer = new Player(result.get(1), result.get(2), gamemode, null, null);
 
         switch (gamemode) {
             case N1:

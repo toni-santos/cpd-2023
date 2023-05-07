@@ -22,11 +22,15 @@ public class Game implements Runnable {
     private boolean talked = false;
     private Selector selector;
     private ServerSocketChannel serverSocketChannel;
+    private ServerCodes gamemode;
     private boolean gameOver = false;
+    private String winner;
+    private String loser;
 
-    public Game(List<Player> players, String port) throws IOException {
+    public Game(List<Player> players, String port, ServerCodes gamemode) throws IOException {
         this.players = players;
         this.port = port;
+        this.gamemode = gamemode;
         this.selector = Selector.open();
 
         this.serverSocketChannel = ServerSocketChannel.open();
@@ -73,11 +77,18 @@ public class Game implements Runnable {
                 }
             }
         }
+
+        String endGameString = ServerCodes.GG + "," + this.port + "," + this.winner + "," + this.loser;
         try {
             serverSocketChannel.close();
+            selector.selectNow();
+            write(mainServerSocket, endGameString);
+            System.out.println(endGameString);
+            mainServerSocket.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+
     }
 
     private void accept(SelectionKey key) throws IOException {
@@ -87,7 +98,7 @@ public class Game implements Runnable {
         socketChannel.configureBlocking(false);
         socketChannel.register(selector, SelectionKey.OP_READ);
 
-        System.out.println("Player connected on socket: " + socketChannel.getRemoteAddress());
+        System.out.println("Player connected to game (" + this.port + ") on socket: " + socketChannel.getRemoteAddress());
     }
 
     private void read(SelectionKey key) throws IOException {
@@ -132,13 +143,13 @@ public class Game implements Runnable {
 
     private void endGame(Player winner, Player loser) {
         try {
-            String endGameString = ServerCodes.GG + "," + this.port + "," + winner.getPlayer() + "," + loser.getPlayer();
+            this.winner = winner.getPlayer();
+            this.loser = loser.getPlayer();
 
             for (Player p: players) {
                 disconnect(p.getSocketChannel());
             }
             this.gameOver = true;
-            write(mainServerSocket, endGameString);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

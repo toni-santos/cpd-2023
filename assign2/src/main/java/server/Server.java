@@ -1,6 +1,7 @@
 package server;
 
 import game.Game;
+import utils.TokenGenerator;
 
 import java.io.*;
 import java.net.*;
@@ -26,11 +27,11 @@ public class Server {
     private static final ReadWriteLock N1Lock = new ReentrantReadWriteLock();
     private static final ReadWriteLock runningGamesLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock gamePortsLock = new ReentrantReadWriteLock();
+    private Object serverLock = new Object();
+    private boolean availableGame = true;
     private Selector selector;
-    private Map<SocketChannel, String> clients;
+    private Map<SocketChannel, Player> clients;
     private Authentication auth;
-    private SocketChannel matchmaking;
-    private Matchmaking mmServer;
     private ExecutorService threadPool;
     private List<Player> normal1v1 = new ArrayList<>();
     private List<String> gamePorts = new ArrayList<>();
@@ -49,7 +50,7 @@ public class Server {
         System.out.println("Server is listening on port 9000");
 
         // Start thread pool
-        int maxGames = 5;
+        int maxGames = 1;
 
         this.threadPool = Executors.newFixedThreadPool(maxGames);
 
@@ -89,6 +90,7 @@ public class Server {
             N1Lock.readLock().lock();
             try {
                 if (normal1v1.size() >= 2) {
+                    System.out.println("enough players gaming");
                     N1Game = true;
                     Player player1 = normal1v1.get(0);
                     Player player2 = normal1v1.get(1);
@@ -111,40 +113,51 @@ public class Server {
         }
     }
 
-    private void startGame(ServerCodes gamemode, List<Player> playerList) throws InterruptedException, IOException {
-        switch (gamemode) {
-            case N1 -> {
-                // TODO: do this better
-                gamePortsLock.readLock().lock();
+    private void startGame(ServerCodes gamemode, List<Player> playerList) throws IOException {
+        // Wait until a game is available
+        synchronized (serverLock) {
+            while (!availableGame) {
                 try {
-                    while (gamePorts.size() == 0) {
-                        Thread.sleep(500);
-                    }
-                } finally {
-                    gamePortsLock.readLock().unlock();
+                    serverLock.wait();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
                 }
-                String port = gamePorts.get(0);
-
-                gamePortsLock.writeLock().lock();
-                try {
-                    gamePorts.remove(0);
-                } finally {
-                    gamePortsLock.writeLock().unlock();
-                }
-
-                Game game = new Game(playerList, port);
-                threadPool.submit(game);
-
-                runningGamesLock.writeLock().lock();
-                try {
-                    runningGames.add(port);
-                } finally {
-                    runningGamesLock.writeLock().unlock();
-                }
-
-                alertGameFound(playerList, port);
             }
         }
+
+        // Games are available
+        String port = gamePorts.get(0);
+
+        // Update list of available game ports
+        gamePortsLock.writeLock().lock();
+        try {
+            gamePorts.remove(0);
+        } finally {
+            gamePortsLock.writeLock().unlock();
+        }
+
+        // Update list of running game ports
+        runningGamesLock.writeLock().lock();
+        try {
+            runningGames.add(port);
+        } finally {
+            runningGamesLock.writeLock().unlock();
+        }
+
+        // Update, if necessary, game availability
+        synchronized (serverLock) {
+            if (gamePorts.size() == 0) {
+                availableGame = false;
+                serverLock.notify();
+            }
+        }
+
+        // Create game object and add it to the queue
+        Game game = new Game(playerList, port, gamemode);
+        threadPool.submit(game);
+
+        // Tell players to join game
+        alertGameFound(playerList, port);
     }
 
     private void alertGameFound(List<Player> players, String port) throws IOException {
@@ -158,9 +171,10 @@ public class Server {
         SocketChannel socketChannel = (SocketChannel) key.channel();
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         int bytesRead = 0;
-
+        
         try {
             bytesRead = socketChannel.read(buffer);
+            System.out.println("bytesRead = " + bytesRead);
         } catch (SocketException e) {
             socketChannel.close();
             return;
@@ -182,10 +196,13 @@ public class Server {
         switch (code) {
             case LOG:
                 if (logInAttempt(message.get(1), message.get(2))) {
-                    String response = String.valueOf(ServerCodes.OK);
+                    String token = TokenGenerator.generateToken();
+                    String response = ServerCodes.OK + "," + token;
+                    String elo = auth.getPlayerElo(message.get(1));
+                    Player player = new Player(message.get(1), elo, null, socketChannel, token);
                     clientsLock.writeLock().lock();
                     try {
-                        clients.put(socketChannel, message.get(1));
+                        clients.put(socketChannel, player);
                     } finally {
                         clientsLock.writeLock().unlock();
                     }
@@ -197,10 +214,13 @@ public class Server {
                 break;
             case REG:
                 if (registerAttempt(message.get(1), message.get(2))) {
-                    String response = String.valueOf(ServerCodes.OK);
+                    String token = TokenGenerator.generateToken();
+                    String response = ServerCodes.OK + "," + token;
+                    String elo = auth.getPlayerElo(message.get(1));
+                    Player player = new Player(message.get(1), elo, null, socketChannel, token);
                     clientsLock.writeLock().lock();
                     try {
-                        clients.put(socketChannel, message.get(1));
+                        clients.put(socketChannel, player);
                     } finally {
                         clientsLock.writeLock().unlock();
                     }
@@ -210,22 +230,28 @@ public class Server {
                     write(socketChannel, response);
                 }
                 break;
+            case DC:
+                disconnect(socketChannel);
+                break;
             case N1:
-                clientsLock.readLock().lock();
-                try {
-                    String user = clients.get(socketChannel);
-                    String elo = auth.getPlayerElo(user);
-
-                    // Lock 1v1 list
-                    N1Lock.writeLock().lock();
+                if (verifyToken(socketChannel, message.get(1))) {
+                    clientsLock.readLock().lock();
                     try {
-                        normal1v1.add(new Player(user, elo, ServerCodes.N1, socketChannel));
+                        Player player = clients.get(socketChannel);
+                        player.setGamemode(ServerCodes.N1);
+
+                        N1Lock.writeLock().lock();
+                        try {
+                            normal1v1.add(player);
+                        } finally {
+                            N1Lock.writeLock().unlock();
+                        }
                     } finally {
-                        // unlock 1v1 list
-                        N1Lock.writeLock().unlock();
+                        clientsLock.readLock().unlock();
                     }
-                } finally {
-                    clientsLock.readLock().unlock();
+                } else {
+                    System.out.println("INVALID TOKEN FOUND REMOVING CLIENT");
+                    disconnect(socketChannel);
                 }
                 break;
             case GG:
@@ -249,12 +275,23 @@ public class Server {
                     runningGamesLock.writeLock().unlock();
                 }
 
+                synchronized (serverLock) {
+                    if (gamePorts.size() != 0) {
+                        availableGame = true;
+                        serverLock.notify();
+                    }
+                }
+
                 auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
                 auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
                 break;
             default:
                 break;
         }
+    }
+
+    private boolean verifyToken(SocketChannel socketChannel, String token) {
+        return clients.get(socketChannel).getToken().equals(token);
     }
 
     private void write(SocketChannel socketChannel, String response) throws IOException {
@@ -265,15 +302,24 @@ public class Server {
     private void disconnect(SocketChannel socketChannel) throws IOException {
         String clientName;
         clientsLock.readLock().lock();
-        clientsLock.writeLock().lock();
         try {
-            clientName = clients.get(socketChannel);
-            clients.remove(socketChannel);
+            if (clients.get(socketChannel) != null) {
+                clientName = clients.get(socketChannel).getPlayer();
+            } else {
+                clientName = "[NOT LOGGED IN]";
+            }
         } finally {
             clientsLock.readLock().unlock();
+        }
+
+        clientsLock.writeLock().lock();
+        try {
+            clients.remove(socketChannel);
+        } finally {
             clientsLock.writeLock().unlock();
         }
-        System.out.println("Client " + clientName + " disconnected");
+
+        System.out.println("Client "+ clientName + " disconnected");
         socketChannel.close();
     }
 
@@ -285,20 +331,11 @@ public class Server {
         socketChannel.register(selector, SelectionKey.OP_READ);
         clientsLock.writeLock().lock();
         try {
-            this.clients.put(socketChannel, "");
+            this.clients.put(socketChannel, null);
         } finally {
             clientsLock.writeLock().unlock();
         }
         System.out.println("Client " + socketChannel.getRemoteAddress() + " connected");
-    }
-
-    private void broadcast(String message, SocketChannel excludeChannel) throws IOException {
-        for (SocketChannel socketChannel : clients.keySet()) {
-            if (socketChannel != excludeChannel) {
-                ByteBuffer buffer = ByteBuffer.wrap(message.getBytes());
-                socketChannel.write(buffer);
-            }
-        }
     }
 
     public static void launch() throws IOException {
@@ -310,8 +347,8 @@ public class Server {
     private boolean logInAttempt(String username, String password) {
         clientsLock.readLock().lock();
         try {
-            for (Map.Entry<SocketChannel, String> socketPlayer: clients.entrySet()) {
-                if (socketPlayer.getValue().equals(username)) {
+            for (Map.Entry<SocketChannel, Player> socketPlayer: clients.entrySet()) {
+                if (socketPlayer.getValue() != null && socketPlayer.getValue().getPlayer().equals(username)) {
                     return false;
                 }
             }

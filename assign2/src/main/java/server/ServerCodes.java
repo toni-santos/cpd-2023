@@ -8,6 +8,7 @@ public enum ServerCodes {
     // Log in/Register codes
     LOG,
     REG,
+    DC,
 
     // Gamemode codes
     N1, // Normal 1v1
@@ -17,5 +18,6 @@ public enum ServerCodes {
 
     // Game flow
     GF, // Gmme Found
-    GG  // Game Over
+    GG, // Game Over
+    GS  // Game Start
 }

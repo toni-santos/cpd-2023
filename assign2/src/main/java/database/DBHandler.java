@@ -40,7 +40,7 @@ public class DBHandler {
         if (allLines.size()>0 && userExists(allLines, username))
             return false;
 
-        String information = Stream.of(Integer.toString(allLines.size()+1), username, SHA512Generator.encrypt(password), "0")
+        String information = Stream.of(Integer.toString(allLines.size()+1), username, password, "0")
                 .map(this::escapeSpecialCharacters)
                 .collect(Collectors.joining(","));
 
