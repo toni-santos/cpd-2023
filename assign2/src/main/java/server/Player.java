@@ -4,6 +4,7 @@ import java.nio.channels.SocketChannel;
 
 public class Player {
     private final SocketChannel socketChannel;
+    private SocketChannel gameChannel;
     private String player;
     private String elo;
     private String token;
@@ -36,9 +37,16 @@ public class Player {
     public String getToken() {
         return token;
     }
+
     public void setGamemode(ServerCodes gamemode) {
         this.gamemode = gamemode;
     }
 
+    public SocketChannel getGameChannel() {
+        return gameChannel;
+    }
 
+    public void setGameChannel(SocketChannel gameChannel) {
+        this.gameChannel = gameChannel;
+    }
 }

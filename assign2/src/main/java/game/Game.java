@@ -11,27 +11,52 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
-import java.util.List;
-import java.util.Set;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class Game implements Runnable {
 
     private final SocketChannel mainServerSocket;
     private List<Player> players;
+    private Map<String, Player> playerTokenMap;
     private String port;
-    private boolean talked = false;
+    private String serverPrefix;
     private Selector selector;
     private ServerSocketChannel serverSocketChannel;
     private ServerCodes gamemode;
     private boolean gameOver = false;
     private String winner;
     private String loser;
+    private int turnCount = 1, readyCount, actionCount;
+    private List<Player> team1 = new ArrayList<>();
+    private List<Player> team2 = new ArrayList<>();
+    private List<Player> playersReady = new ArrayList<>();
+    private int team1HP, team2HP;
+    private boolean error;
 
     public Game(List<Player> players, String port, ServerCodes gamemode) throws IOException {
         this.players = players;
         this.port = port;
         this.gamemode = gamemode;
         this.selector = Selector.open();
+        this.serverPrefix = "[" + port + "]";
+
+        switch (gamemode) {
+            case N1, R1 -> {
+                this.readyCount = 2;
+                this.team1 = Arrays.asList(players.get(0));
+                this.team2 = Arrays.asList(players.get(1));
+                this.team1HP = 10;
+                this.team2HP = 10;
+            }
+            case N2, R2 -> {
+                this.readyCount = 4;
+                this.team1 = Arrays.asList(players.get(0), players.get(1));
+                this.team2 = Arrays.asList(players.get(2), players.get(3));
+                this.team1HP = 20;
+                this.team2HP = 20;
+            }
+        }
 
         this.serverSocketChannel = ServerSocketChannel.open();
         this.serverSocketChannel.bind(new InetSocketAddress("localhost" , Integer.parseInt(port)));
@@ -41,7 +66,10 @@ public class Game implements Runnable {
         this.mainServerSocket = SocketChannel.open(new InetSocketAddress("localhost", 9000));
         this.mainServerSocket.configureBlocking(true);
 
-        System.out.print("Started game server on port: " + port + "\nPlayers:");
+        this.playerTokenMap = players.stream().collect(Collectors.toMap(Player::getToken, player -> player));
+
+        System.out.println(serverPrefix + " Started game server.");
+        System.out.print(serverPrefix + " Players:");
         for (Player p : players) {
             System.out.print(" " + p.getPlayer());
         }
@@ -78,17 +106,25 @@ public class Game implements Runnable {
             }
         }
 
-        String endGameString = ServerCodes.GG + "," + this.port + "," + this.winner + "," + this.loser;
+        closeServer();
+    }
+
+    private void closeServer() {
+        String endGameString;
+        if (this.error) {
+            endGameString = ServerCodes.GG + "," + ServerCodes.ERR + "," + this.port;
+        } else {
+            endGameString = ServerCodes.GG + "," + this.port + "," + this.winner + "," + this.loser;
+        }
+
         try {
             serverSocketChannel.close();
             selector.selectNow();
             write(mainServerSocket, endGameString);
-            System.out.println(endGameString);
             mainServerSocket.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
-
     }
 
     private void accept(SelectionKey key) throws IOException {
@@ -98,7 +134,7 @@ public class Game implements Runnable {
         socketChannel.configureBlocking(false);
         socketChannel.register(selector, SelectionKey.OP_READ);
 
-        System.out.println("Player connected to game (" + this.port + ") on socket: " + socketChannel.getRemoteAddress());
+        System.out.println(serverPrefix + " Player connected to game on socket " + socketChannel.getRemoteAddress());
     }
 
     private void read(SelectionKey key) throws IOException {
@@ -124,37 +160,144 @@ public class Game implements Runnable {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
-        System.out.println(message);
-        if (talked) {
-            endGame(players.get(0), players.get(1));
-        }
-        talked = true;
-        // TODO: do game stuff now OuO
-        /*
-        ServerCodes code = ServerCodes.valueOf(message.get(0));
+
+        GameCodes code = GameCodes.valueOf(message.get(0));
+        String token = message.get(1);
 
         switch (code) {
+            case ERR:
+                System.out.println(serverPrefix + " FATAL ERROR - CLOSING SERVER");
+                this.error = true;
+                endGame(null, null);
+                break;
+            case READY:
+                if (verifyToken(token)) {
+                    Player player = players.stream().filter(p -> p.getToken().equals(token)).toList().get(0);
+                    player.setGameChannel(socketChannel);
+                    if (!playersReady.contains(player)) playersReady.add(player);
+                    if (playersReady.size() == readyCount) {
+                        List<String> team1Names = team1.stream().map(p -> {
+                            return p.getPlayer();
+                        }).toList();
+                        List<String> team2Names = team2.stream().map(p -> {
+                            return p.getPlayer();
+                        }).toList();
+                        String team1String = String.join(",", team1Names);
+                        String team2String = String.join(",", team2Names);
+                        String startMessage = GameCodes.START + "," + team1String + "," + team2String;
+                        broadcast(startMessage, players);
+                        String turnMessage = GameCodes.TURN + "," + turnCount;
+                        broadcast(turnMessage, players);
+                    }
+                }
+                break;
+            case ACTION:
+                if (verifyToken(token)) {
+                    GameCodes actionType = GameCodes.valueOf(message.get(2));
+                    resolveAction(actionType, token);
+
+                    if (team1HP <= 0) {
+                        endGame(team1, team2);
+                    } else if (team2HP <= 0) {
+                        endGame(team2, team1);
+                    }
+
+                    switch (gamemode) {
+                        case N1, R1 -> {
+                            if (actionCount == 2) {
+                                turnCount++;
+                                String turnMessage = GameCodes.TURN + "," + turnCount;
+                                broadcast(turnMessage, players);
+                            }
+                        }
+                        case N2, R2 -> {
+                            if (actionCount == 4) {
+                                turnCount++;
+                                String turnMessage = GameCodes.TURN + "," + turnCount;
+                                broadcast(turnMessage, players);
+                            }
+                        }
+                    }
+                }
+                break;
             default:
-                System.out.println(code);
                 break;
         }
-        */
     }
 
-    private void endGame(Player winner, Player loser) {
-        try {
-            this.winner = winner.getPlayer();
-            this.loser = loser.getPlayer();
+    private void resolveAction(GameCodes actionType, String token) throws IOException {
+        System.out.println("hi");
+        Random random = new Random();
+        int damage = 0, selfdamage = 0;
 
+        switch (actionType) {
+            case D6 -> {
+                damage = random.nextInt(6) + 1;
+                selfdamage = 6 - damage;
+            }
+            case D12 -> {
+                damage = random.nextInt(12) + 1;
+                selfdamage = 12 - damage;
+            }
+            case D20 -> {
+                damage = random.nextInt(20) + 1;
+                selfdamage = 20 - damage;
+            }
+        }
+
+        System.out.println("damage = " + damage);
+        System.out.println("selfdamage = " + selfdamage);
+        Player player = playerTokenMap.get(token);
+        System.out.println(player);
+        if (team1.contains(player)) {
+            team2HP -= damage;
+            team1HP -= selfdamage;
+        } else {
+            team1HP -= damage;
+            team2HP -= selfdamage;
+        }
+        String update = GameCodes.UPDATE + "," + player.getPlayer() + "," + damage + "," + team1HP + "," + team2HP;
+        System.out.println(update);
+        broadcast(update, players);
+
+        actionCount++;
+    }
+
+    private boolean verifyToken(String token) {
+        List<Player> filtered = players.stream().filter(player -> player.getToken().equals(token)).toList();
+        return filtered.size() == 1;
+    }
+
+    private void endGame(List<Player> winner, List<Player> loser) throws IOException {
+        if (this.error) {
             for (Player p: players) {
                 disconnect(p.getSocketChannel());
+            }
+            this.gameOver = true;
+
+            return;
+        }
+        
+        try {
+            for (Player p: players) {
+                if (winner.contains(p)) {
+                    write(p.getGameChannel(), GameCodes.GG + "," + GameCodes.W);
+                } else {
+                    write(p.getGameChannel(), GameCodes.GG + "," + GameCodes.L);
+                }
+                disconnect(p.getGameChannel());
             }
             this.gameOver = true;
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+    }
 
-
+    private void broadcast(String message, List<Player> channels) throws IOException {
+        for (Player player : channels) {
+            ByteBuffer buffer = ByteBuffer.wrap(message.getBytes());
+            player.getGameChannel().write(buffer);
+        }
     }
 
     private void write(SocketChannel socketChannel, String response) throws IOException {

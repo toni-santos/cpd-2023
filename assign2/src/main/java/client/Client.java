@@ -1,5 +1,6 @@
 package client;
 
+import game.GameCodes;
 import server.ServerCodes;
 import utils.SHA512Generator;
 
@@ -8,6 +9,8 @@ import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.util.*;
+
+import static server.ServerCodes.GG;
 
 /**
  * This program demonstrates a simple TCP/IP socket client.
@@ -18,26 +21,31 @@ public class Client {
 
     private final String HOSTNAME = "localhost";
     private final int PORT = 9000;
+    private final Scanner consoleInput;
     private String user;
     private String token;
     private SocketChannel serverSocket;
     private SocketChannel gameSocket;
+    private ServerCodes gamemode;
+    private List<String> team1;
+    private List<String> team2;
 
     public Client() throws IOException {
         this.serverSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, PORT));
         this.serverSocket.configureBlocking(true);
+        this.consoleInput = new Scanner(System.in);
     }
 
     public void run() throws IOException {
-        Scanner consoleInput = new Scanner(System.in);
-
         if (serverSocket.isConnected()) {
-            if (logInRegister(consoleInput)) {
-                int port = chooseGameMode(consoleInput);
-                if (port != -1) {
-                    connectToGameServer(port);
-                    while (true) {
-                        gameLoop(consoleInput);
+            if (logInRegister()) {
+                while (true) {
+                    int port = chooseGameMode();
+                    if (port != -1) {
+                        connectToGameServer(port);
+                        gameLoop();
+                    } else {
+                        break;
                     }
                 }
             }
@@ -48,14 +56,111 @@ public class Client {
     private void connectToGameServer(int port) throws IOException {
         this.gameSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, port));
         this.gameSocket.configureBlocking(true);
+
+        String readyString = GameCodes.READY + "," + this.token;
+        this.gameSocket.write(ByteBuffer.wrap(readyString.getBytes()));
+
+        ByteBuffer buffer = ByteBuffer.allocate(1024);
+        int bytesRead = this.gameSocket.read(buffer);
+
+        if (bytesRead == -1) {
+            return;
+        }
+
+        String rawMessage = new String(buffer.array()).trim();
+        List<String> message = List.of(rawMessage.split(","));
+        GameCodes code = GameCodes.valueOf(message.get(0));
+        System.out.println(message.get(0));
+        if (code == GameCodes.START) {
+            switch (this.gamemode) {
+                case N1, R1 -> {
+                    this.team1 = Arrays.asList(message.get(1));
+                    this.team2 = Arrays.asList(message.get(2));
+                }
+                case N2, R2 -> {
+                    this.team1 = Arrays.asList(message.get(1), message.get(2));
+                    this.team2 = Arrays.asList(message.get(3), message.get(4));
+                }
+            }
+            System.out.println("Game Starting...");
+        } else {
+            this.gameSocket.write(ByteBuffer.wrap((GameCodes.ERR + "," + token).getBytes()));
+        }
     }
 
-    private void gameLoop(Scanner consoleInput) throws IOException {
-        // TODO: do game stuff now OuO
+    private void gameLoop() throws IOException {
+        System.out.println("\nGame Started!\n");
+        System.out.println(String.join(" ", team1) + " vs " + String.join(" ", team2));
+        while (true) {
+            ByteBuffer buffer = ByteBuffer.allocate(1024);
+            int bytesRead = this.gameSocket.read(buffer);
+            if (bytesRead == -1) {
+                return;
+            }
+            String rawMessage = new String(buffer.array()).trim();
+            List<String> message = List.of(rawMessage.split(","));
+            GameCodes code = GameCodes.valueOf(message.get(0));
 
-        System.out.println("Talk back: ");
-        String res = consoleInput.next();
-        gameSocket.write(ByteBuffer.wrap(res.getBytes()));
+            switch (code) {
+                case TURN -> {
+                    String turnNumber = message.get(1);
+                    System.out.println("Turn " + turnNumber + "!");
+                    playerAction();
+                }
+                case GG -> {
+                    GameCodes result = GameCodes.valueOf(message.get(1));
+                    if (result == GameCodes.W) {
+                        System.out.println("You Won!\nReturning to main menu...");
+                    } else if (result == GameCodes.L) {
+                        System.out.println("You Lost!\nReturning to main menu...");
+                    }
+                    return;
+                }
+                case UPDATE -> {
+                    String playerName = message.get(1);
+                    String damage = message.get(2);
+                    String team1HP = message.get(3);
+                    String team2HP = message.get(4);
+
+                    if (playerName.equals(this.user)) {
+                        System.out.println();
+                    } else {
+                        System.out.println();
+                    }
+                }
+            }
+        }
+    }
+
+    private void playerAction() throws IOException {
+        System.out.print("""
+                Pick a dice to roll!
+                1. D6
+                2. D12
+                3. D20
+                -\s""");
+
+        int opt = consoleInput.nextInt();
+
+        switch (opt) {
+            case 1 -> {
+                String actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D6;
+                gameSocket.write(ByteBuffer.wrap(actionString.getBytes()));
+            }
+            case 2 -> {
+                String actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D12;
+                gameSocket.write(ByteBuffer.wrap(actionString.getBytes()));
+            }
+            case 3 -> {
+                String actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D20;
+                gameSocket.write(ByteBuffer.wrap(actionString.getBytes()));
+            }
+            default -> {
+                System.out.println("Invalid input, try again!");
+                playerAction();
+            }
+        }
+
     }
 
     public static void launch() throws IOException {
@@ -63,7 +168,7 @@ public class Client {
         client.run();
     }
 
-    private boolean logInRegister(Scanner consoleInput) throws IOException {
+    private boolean logInRegister() throws IOException {
         int opt = logInRegisterSelection(consoleInput);
 
         if (opt == 3) {
@@ -97,25 +202,26 @@ public class Client {
             this.user = creds.get(1);
         } else {
             System.out.println("Login/register failed!");
-            return logInRegister(consoleInput);
+            return logInRegister();
         }
         return true;
     }
 
-    private int chooseGameMode(Scanner consoleInput) throws IOException {
+    private int chooseGameMode() throws IOException {
         int opt = gameModeSelection(consoleInput);
         switch (opt) {
             case 1:
+                this.gamemode = ServerCodes.valueOf("N" + opt);
                 return search("N" + opt);
             case 5:
-                disconnect();
+                disconnect(this.serverSocket);
                 return -1;
         }
         return -1;
     }
 
-    private void disconnect() throws IOException {
-        this.serverSocket.close();
+    private void disconnect(SocketChannel socket) throws IOException {
+        socket.close();
     }
 
     private int search(String gamemode) throws IOException {

@@ -174,7 +174,6 @@ public class Server {
         
         try {
             bytesRead = socketChannel.read(buffer);
-            System.out.println("bytesRead = " + bytesRead);
         } catch (SocketException e) {
             socketChannel.close();
             return;
@@ -255,11 +254,20 @@ public class Server {
                 }
                 break;
             case GG:
-                System.out.println("Game ended");
+                String port, winner, loser;
 
-                String port = message.get(1);
-                String winner = message.get(2);
-                String loser = message.get(3);
+                if (message.get(1).equals(ServerCodes.ERR)) {
+                    port = message.get(2);
+                } else {
+                    port = message.get(1);
+                    winner = message.get(2);
+                    loser = message.get(3);
+
+                    auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
+                    auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
+                }
+
+                System.out.println("Game ended in port " + port);
 
                 gamePortsLock.writeLock().lock();
                 try {
@@ -282,8 +290,6 @@ public class Server {
                     }
                 }
 
-                auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
-                auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
                 break;
             default:
                 break;

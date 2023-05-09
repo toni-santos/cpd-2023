@@ -1,9 +1,7 @@
 import client.Client;
-import server.Matchmaking;
 import server.Server;
 
 import java.io.IOException;
-import java.security.SecureRandom;
 
 public class App {
     public static void main(String[] args) throws IOException {
