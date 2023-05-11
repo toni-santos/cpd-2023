@@ -9,6 +9,8 @@ public class Player {
     private String elo;
     private String token;
     private ServerCodes gamemode;
+    private double searchTime;
+    private double eloRange = 0.0;
 
     public Player(String player, String elo, ServerCodes gamemode, SocketChannel socketChannel, String token) {
         this.player = player;
@@ -22,8 +24,8 @@ public class Player {
         return player;
     }
 
-    public String getElo() {
-        return elo;
+    public Integer getElo() {
+        return Integer.parseInt(elo);
     }
 
     public ServerCodes getGamemode() {
@@ -45,6 +47,9 @@ public class Player {
     public SocketChannel getGameChannel() {
         return gameChannel;
     }
+    public void setSearchTime() { this.searchTime = System.currentTimeMillis(); }
+    public double getEloRange() { return eloRange; }
+    public void setEloRange(double currentTime) { this.eloRange = currentTime - searchTime; }
 
     public void setGameChannel(SocketChannel gameChannel) {
         this.gameChannel = gameChannel;

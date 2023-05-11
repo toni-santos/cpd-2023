@@ -94,6 +94,7 @@ public class Client {
         while (true) {
             ByteBuffer buffer = ByteBuffer.allocate(1024);
             int bytesRead = this.gameSocket.read(buffer);
+            System.out.println("bytesRead = " + bytesRead);
             if (bytesRead == -1) {
                 return;
             }
@@ -210,9 +211,12 @@ public class Client {
     private int chooseGameMode() throws IOException {
         int opt = gameModeSelection(consoleInput);
         switch (opt) {
-            case 1:
+            case 1, 2:
                 this.gamemode = ServerCodes.valueOf("N" + opt);
                 return search("N" + opt);
+            case 3, 4:
+                this.gamemode = ServerCodes.valueOf("R" + (opt - 2));
+                return search("R" + (opt - 2));
             case 5:
                 disconnect(this.serverSocket);
                 return -1;
@@ -238,6 +242,7 @@ public class Client {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> result = List.of(rawMessage.split(","));
+        System.out.println("result = " + result);
         ServerCodes code = ServerCodes.valueOf(result.get(0));
         String port = result.get(1);
 
@@ -254,12 +259,13 @@ public class Client {
         System.out.print("Welcome " + this.user + "!\n" +
                 "What would you like to do?\n" +
                 "1. 1v1 Normal\n" +
+                "3. 1v1 Ranked\n" +
                 "5. Quit\n" +
                 "- ");
         int opt = consoleInput.nextInt();
 
         switch (opt) {
-            case 1, 5 -> {
+            case 1, 3, 5 -> {
                 return opt;
             }
             default -> {
@@ -287,7 +293,8 @@ public class Client {
         System.out.print("Password: ");
         String password = consoleInput.next();
 
-        if (password.length() < 8) {
+        //TODO: Change password lengths back to just < 8
+        if (password.length() < 8 && password.length() > 1) {
             System.out.println("Invalid password, try again!");
             return getPassword(consoleInput);
         }

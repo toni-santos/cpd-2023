@@ -13,6 +13,7 @@ import java.nio.channels.SocketChannel;
 import java.util.*;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -25,6 +26,7 @@ public class Server {
 
     private static final ReadWriteLock clientsLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock N1Lock = new ReentrantReadWriteLock();
+    private static final ReadWriteLock R1Lock = new ReentrantReadWriteLock();
     private static final ReadWriteLock runningGamesLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock gamePortsLock = new ReentrantReadWriteLock();
     private Object serverLock = new Object();
@@ -34,6 +36,7 @@ public class Server {
     private Authentication auth;
     private ExecutorService threadPool;
     private List<Player> normal1v1 = new ArrayList<>();
+    private List<Player> ranked1v1 = new ArrayList<>();
     private List<String> gamePorts = new ArrayList<>();
     private List<String> runningGames = new ArrayList<>();
 
@@ -60,14 +63,39 @@ public class Server {
     }
 
     public void run() throws IOException {
+        AtomicBoolean runThread = new AtomicBoolean(true);
         // Create a thread to check for matches and creates separate threads for them from a thread pool
-        new Thread(() -> {
+        Thread thread = new Thread(() -> {
+            while (runThread.get()) {
+                double currentSearchTime = System.currentTimeMillis();
+                for (Player player : ranked1v1) {
+                    player.setEloRange(currentSearchTime);
+                    System.out.println("player.getEloRange() = " + player.getEloRange());
+                }
+                if (!ranked1v1.isEmpty()) {
+                    try {
+                        checkMatchmaking();
+                    } catch (IOException | InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        });
+        thread.start();
+
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            runThread.set(false);
             try {
-                checkMatchmaking();
-            } catch (IOException | InterruptedException e) {
+                thread.join();
+            } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-        }).start();
+        }));
 
         while (true) {
             selector.select();
@@ -84,33 +112,63 @@ public class Server {
     }
 
     private void checkMatchmaking() throws IOException, InterruptedException {
-        while (true) {
-            boolean N1Game = false, N2Game, R1Game, R2Game;
-            List<Player> N1Players = new ArrayList<>();
-            N1Lock.readLock().lock();
-            try {
-                if (normal1v1.size() >= 2) {
-                    System.out.println("enough players gaming");
-                    N1Game = true;
-                    Player player1 = normal1v1.get(0);
-                    Player player2 = normal1v1.get(1);
-                    N1Players = Arrays.asList(player1, player2);
-                }
-            } finally {
-                N1Lock.readLock().unlock();
+        boolean N1Game = false, N2Game, R1Game = false, R2Game;
+        List<Player> N1Players = new ArrayList<>();
+        List<Player> R1Players = new ArrayList<>();
+        N1Lock.readLock().lock();
+        try {
+            if (normal1v1.size() >= 2) {
+                System.out.println("enough players gaming");
+                System.out.println("normal1v1 = " + normal1v1);
+                N1Game = true;
+                Player player1 = normal1v1.get(0);
+                Player player2 = normal1v1.get(1);
+                N1Players = Arrays.asList(player1, player2);
             }
+            else if (ranked1v1.size() >= 2) {
 
-            if (N1Game) {
-                N1Lock.writeLock().lock();
-                try {
-                    normal1v1.remove(0);
-                    normal1v1.remove(0);
-                } finally {
-                    N1Lock.writeLock().unlock();
+                System.out.println("enough players gaming");
+                Player player1 = ranked1v1.get(0);
+                Player player2 = ranked1v1.get(1);
+                if (checkEloRange(player1, ranked1v1) && checkEloRange(player2, ranked1v1)) {
+                    R1Game = true;
+                    R1Players = Arrays.asList(player1, player2);
                 }
-                startGame(ServerCodes.N1, N1Players);
             }
+        } finally {
+            N1Lock.readLock().unlock();
         }
+
+        if (N1Game) {
+            N1Lock.writeLock().lock();
+            try {
+                normal1v1.remove(0);
+                normal1v1.remove(0);
+            } finally {
+                N1Lock.writeLock().unlock();
+            }
+            startGame(ServerCodes.N1, N1Players);
+        }
+        if (R1Game) {
+            R1Lock.writeLock().lock();
+            try {
+                ranked1v1.remove(0);
+                ranked1v1.remove(0);
+            } finally {
+                R1Lock.writeLock().unlock();
+            }
+            startGame(ServerCodes.R1, R1Players);
+        }
+    }
+
+    private boolean checkEloRange(Player chosenPlayer, List<Player> list) {
+        double lowerBound = chosenPlayer.getElo() - chosenPlayer.getEloRange();
+        double upperBound = chosenPlayer.getElo() + chosenPlayer.getEloRange();
+        for (Player player: list) {
+            if (chosenPlayer.equals(player)) continue;
+            if (lowerBound >= player.getElo() || upperBound <= player.getElo()) return false;
+        }
+        return true;
     }
 
     private void startGame(ServerCodes gamemode, List<Player> playerList) throws IOException {
@@ -155,7 +213,7 @@ public class Server {
         // Create game object and add it to the queue
         Game game = new Game(playerList, port, gamemode);
         threadPool.submit(game);
-
+        System.out.println("Game found!");
         // Tell players to join game
         alertGameFound(playerList, port);
     }
@@ -190,6 +248,7 @@ public class Server {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
+        System.out.println("message = " + message);
         ServerCodes code = ServerCodes.valueOf(message.get(0));
 
         switch (code) {
@@ -242,6 +301,9 @@ public class Server {
                         N1Lock.writeLock().lock();
                         try {
                             normal1v1.add(player);
+                            checkMatchmaking();
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
                         } finally {
                             N1Lock.writeLock().unlock();
                         }
@@ -253,18 +315,52 @@ public class Server {
                     disconnect(socketChannel);
                 }
                 break;
+            case R1:
+                if (verifyToken(socketChannel, message.get(1))) {
+                    clientsLock.readLock().lock();
+                    try {
+                        Player player = clients.get(socketChannel);
+                        player.setGamemode(ServerCodes.R1);
+
+                        R1Lock.writeLock().lock();
+                        try {
+                            player.setSearchTime();
+                            ranked1v1.add(player);
+                            checkMatchmaking();
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        } finally {
+                            R1Lock.writeLock().unlock();
+                        }
+                    } finally {
+                        clientsLock.readLock().unlock();
+                    }
+                } else {
+                    System.out.println("INVALID TOKEN FOUND REMOVING CLIENT");
+                    disconnect(socketChannel);
+                }
+                break;
             case GG:
-                String port, winner, loser;
+                String port;
+                ServerCodes gamemode;
 
                 if (message.get(1).equals(ServerCodes.ERR)) {
                     port = message.get(2);
                 } else {
-                    port = message.get(1);
-                    winner = message.get(2);
-                    loser = message.get(3);
-
-                    auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
-                    auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
+                    System.out.println(message);
+                    port = message.get(2);
+                    gamemode = ServerCodes.valueOf(message.get(1));
+                    if (gamemode == ServerCodes.R1 || gamemode == ServerCodes.R2) {
+                        List<String> winners, losers;
+                        winners = List.of(message.get(3).split("-"));
+                        losers = List.of(message.get(4).split("-"));
+                        for (String winner : winners) {
+                            auth.setPlayerElo(winner, String.valueOf(Integer.parseInt(auth.getPlayerElo(winner)) + 20));
+                        }
+                        for (String loser: losers) {
+                            auth.setPlayerElo(loser, String.valueOf(Math.max(0, Integer.parseInt(auth.getPlayerElo(loser)) - 20)));
+                        }
+                    }
                 }
 
                 System.out.println("Game ended in port " + port);

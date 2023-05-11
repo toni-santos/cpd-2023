@@ -25,8 +25,8 @@ public class Game implements Runnable {
     private ServerSocketChannel serverSocketChannel;
     private ServerCodes gamemode;
     private boolean gameOver = false;
-    private String winner;
-    private String loser;
+    private List<Player> winner;
+    private List<Player> loser;
     private int turnCount = 1, readyCount, actionCount;
     private List<Player> team1 = new ArrayList<>();
     private List<Player> team2 = new ArrayList<>();
@@ -78,10 +78,7 @@ public class Game implements Runnable {
 
     @Override
     public void run() {
-        while (true) {
-            if (gameOver) {
-                break;
-            }
+        while (!gameOver) {
             try {
                 selector.select();
             } catch (IOException e) {
@@ -89,23 +86,28 @@ public class Game implements Runnable {
             }
             Set<SelectionKey> keys = selector.selectedKeys();
             for (SelectionKey key : keys) {
-                if (key == null) continue;
+                if (!key.isValid()) {
+                    continue;
+                }
                 if (key.isAcceptable()) {
                     try {
+                        System.out.println("Acceptable");
                         accept(key);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
                 } else if (key.isReadable()) {
                     try {
+                        System.out.println("Readable");
                         read(key);
+                        System.out.println("after game read");
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
                 }
             }
         }
-
+        System.out.println(serverPrefix + " Game over!");
         closeServer();
     }
 
@@ -114,7 +116,9 @@ public class Game implements Runnable {
         if (this.error) {
             endGameString = ServerCodes.GG + "," + ServerCodes.ERR + "," + this.port;
         } else {
-            endGameString = ServerCodes.GG + "," + this.port + "," + this.winner + "," + this.loser;
+            String winnerStr = String.join("-", this.winner.stream().map(Player::getPlayer).toList());
+            String loserStr = String.join("-", this.loser.stream().map(Player::getPlayer).toList());
+            endGameString = ServerCodes.GG + "," + this.gamemode + "," + this.port + "," + winnerStr + "," + loserStr;
         }
 
         try {
@@ -176,12 +180,8 @@ public class Game implements Runnable {
                     player.setGameChannel(socketChannel);
                     if (!playersReady.contains(player)) playersReady.add(player);
                     if (playersReady.size() == readyCount) {
-                        List<String> team1Names = team1.stream().map(p -> {
-                            return p.getPlayer();
-                        }).toList();
-                        List<String> team2Names = team2.stream().map(p -> {
-                            return p.getPlayer();
-                        }).toList();
+                        List<String> team1Names = team1.stream().map(Player::getPlayer).toList();
+                        List<String> team2Names = team2.stream().map(Player::getPlayer).toList();
                         String team1String = String.join(",", team1Names);
                         String team2String = String.join(",", team2Names);
                         String startMessage = GameCodes.START + "," + team1String + "," + team2String;
@@ -195,26 +195,15 @@ public class Game implements Runnable {
                 if (verifyToken(token)) {
                     GameCodes actionType = GameCodes.valueOf(message.get(2));
                     resolveAction(actionType, token);
-
-                    if (team1HP <= 0) {
-                        endGame(team1, team2);
-                    } else if (team2HP <= 0) {
-                        endGame(team2, team1);
-                    }
-
                     switch (gamemode) {
                         case N1, R1 -> {
                             if (actionCount == 2) {
-                                turnCount++;
-                                String turnMessage = GameCodes.TURN + "," + turnCount;
-                                broadcast(turnMessage, players);
+                                newTurn();
                             }
                         }
                         case N2, R2 -> {
                             if (actionCount == 4) {
-                                turnCount++;
-                                String turnMessage = GameCodes.TURN + "," + turnCount;
-                                broadcast(turnMessage, players);
+                                newTurn();
                             }
                         }
                     }
@@ -222,6 +211,21 @@ public class Game implements Runnable {
                 break;
             default:
                 break;
+        }
+    }
+
+    private void newTurn() throws IOException {
+        if (team1HP <= 0) {
+            System.out.println("team 2 wins");
+            endGame(team2, team1);
+        } else if (team2HP <= 0) {
+            System.out.println("team 1 wins");
+            endGame(team1, team2);
+        } else {
+            turnCount++;
+            String turnMessage = GameCodes.TURN + "," + turnCount;
+            broadcast(turnMessage, players);
+            System.out.println("after broadcast turn");
         }
     }
 
@@ -274,7 +278,6 @@ public class Game implements Runnable {
                 disconnect(p.getSocketChannel());
             }
             this.gameOver = true;
-
             return;
         }
         
@@ -287,6 +290,8 @@ public class Game implements Runnable {
                 }
                 disconnect(p.getGameChannel());
             }
+            this.winner = winner;
+            this.loser = loser;
             this.gameOver = true;
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -306,7 +311,7 @@ public class Game implements Runnable {
     }
 
     private void disconnect(SocketChannel socketChannel) throws IOException {
-        System.out.println("Client player disconnected");
+        System.out.println(serverPrefix + " Client player disconnected");
         socketChannel.close();
     }
 }
