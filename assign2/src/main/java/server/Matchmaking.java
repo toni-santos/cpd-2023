@@ -47,8 +47,8 @@ public class Matchmaking {
     }
 
     private void gameFound(List<Player> game, ServerCodes gamemode) throws IOException {
-        String player1 = game.get(0).getPlayer();
-        String player2 = game.get(1).getPlayer();
+        String player1 = game.get(0).getName();
+        String player2 = game.get(1).getName();
         game.remove(0);
         game.remove(0);
         String response = gamemode + "," +  player1 + "," + player2;

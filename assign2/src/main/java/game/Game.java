@@ -71,7 +71,7 @@ public class Game implements Runnable {
         System.out.println(serverPrefix + " Started game server.");
         System.out.print(serverPrefix + " Players:");
         for (Player p : players) {
-            System.out.print(" " + p.getPlayer());
+            System.out.print(" " + p.getName());
         }
         System.out.println();
     }
@@ -116,8 +116,8 @@ public class Game implements Runnable {
         if (this.error) {
             endGameString = ServerCodes.GG + "," + ServerCodes.ERR + "," + this.port;
         } else {
-            String winnerStr = String.join("-", this.winner.stream().map(Player::getPlayer).toList());
-            String loserStr = String.join("-", this.loser.stream().map(Player::getPlayer).toList());
+            String winnerStr = String.join("-", this.winner.stream().map(Player::getName).toList());
+            String loserStr = String.join("-", this.loser.stream().map(Player::getName).toList());
             endGameString = ServerCodes.GG + "," + this.gamemode + "," + this.port + "," + winnerStr + "," + loserStr;
         }
 
@@ -180,8 +180,8 @@ public class Game implements Runnable {
                     player.setGameChannel(socketChannel);
                     if (!playersReady.contains(player)) playersReady.add(player);
                     if (playersReady.size() == readyCount) {
-                        List<String> team1Names = team1.stream().map(Player::getPlayer).toList();
-                        List<String> team2Names = team2.stream().map(Player::getPlayer).toList();
+                        List<String> team1Names = team1.stream().map(Player::getName).toList();
+                        List<String> team2Names = team2.stream().map(Player::getName).toList();
                         String team1String = String.join(",", team1Names);
                         String team2String = String.join(",", team2Names);
                         String startMessage = GameCodes.START + "," + team1String + "," + team2String;
@@ -260,7 +260,7 @@ public class Game implements Runnable {
             team1HP -= damage;
             team2HP -= selfdamage;
         }
-        String update = GameCodes.UPDATE + "," + player.getPlayer() + "," + damage + "," + team1HP + "," + team2HP;
+        String update = GameCodes.UPDATE + "," + player.getName() + "," + damage + "," + team1HP + "," + team2HP;
         System.out.println(update);
         broadcast(update, players);
 
