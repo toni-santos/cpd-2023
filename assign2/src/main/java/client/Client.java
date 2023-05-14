@@ -259,13 +259,15 @@ public class Client {
         System.out.print("Welcome " + this.user + "!\n" +
                 "What would you like to do?\n" +
                 "1. 1v1 Normal\n" +
+                "2. 2v2 Normal\n" +
                 "3. 1v1 Ranked\n" +
+                "4. 2v2 Ranked\n" +
                 "5. Quit\n" +
                 "- ");
         int opt = consoleInput.nextInt();
 
         switch (opt) {
-            case 1, 3, 5 -> {
+            case 1, 2, 3, 4, 5 -> {
                 return opt;
             }
             default -> {
