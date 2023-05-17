@@ -149,7 +149,7 @@ public class Game implements Runnable {
         try {
             bytesRead = socketChannel.read(buffer);
         } catch (SocketException e) {
-            socketChannel.close();
+            disconnect(socketChannel);
             return;
         }
 
@@ -312,6 +312,70 @@ public class Game implements Runnable {
 
     private void disconnect(SocketChannel socketChannel) throws IOException {
         System.out.println(serverPrefix + " Client player disconnected");
+
+        Player disconnectedPlayer = null;
+        for (Player player : players) {
+            if (player.getGameChannel() == socketChannel) {
+                disconnectedPlayer = player;
+                break;
+            }
+        }
+
+        Iterator<SelectionKey> iterator = selector.selectedKeys().iterator();
+        while (iterator.hasNext()) {
+            SelectionKey key = iterator.next();
+            if (key.channel() == socketChannel) {
+                key.cancel();
+                break;
+            }
+        }
         socketChannel.close();
+
+
+        if (disconnectedPlayer != null) {
+            List<Player> temp = new ArrayList<Player>();
+            for (Player player : players) {
+                if (player.getGameChannel().isOpen()) {
+                    temp.add(player);
+                }
+            }
+            if (temp.size() == 0) {
+                // All players have disconnected
+                for (Player p: players) {
+                    if (p.getGameChannel().isOpen()) {
+                        p.getGameChannel().close();
+                    }
+                }
+                this.gameOver = true;
+                this.error = true;
+            } else {
+                // Notify the remaining players about the disconnection
+                String disconnectionMessage = GameCodes.DISCONNECT + "," + disconnectedPlayer.getName();
+                broadcast(disconnectionMessage, temp);
+
+                try {
+                    Thread.sleep(15000);
+                } catch (InterruptedException e) {
+
+                }
+
+
+                if (disconnectedPlayer.getGameChannel().isOpen()) {
+                    String reconnectionMessage = GameCodes.RECONNECT + "," + disconnectedPlayer.getName();
+                    broadcast(reconnectionMessage, temp);
+                }
+                else{
+                    for (Player p: players) {
+                        if (p.getGameChannel().isOpen()) {
+                            p.getGameChannel().close();
+                        }
+                    }
+                    this.gameOver = true;
+                    this.error = true;
+                }
+            }
+        }
+
+
     }
 }
