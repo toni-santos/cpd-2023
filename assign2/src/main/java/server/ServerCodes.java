@@ -1,5 +1,7 @@
 package server;
 
+import java.nio.ByteBuffer;
+
 public enum ServerCodes {
     // Confirmation codes
     OK,
@@ -9,6 +11,13 @@ public enum ServerCodes {
     LOG,
     REG,
     DC,
+    ERRDC,
+
+    // Reconnect codes
+    REC, // reconnect
+    Q, // in queue
+    G, // in game
+
 
     // Gamemode codes
     N1, // Normal 1v1
@@ -19,5 +28,7 @@ public enum ServerCodes {
     // Game flow
     GF, // Gmme Found
     GG, // Game Over
-    GS  // Game Start
+    GS, // Game Start
+    GP  // Game Port
+
 }

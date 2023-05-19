@@ -5,49 +5,56 @@ import server.ServerCodes;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.SocketException;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.util.*;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
+
+import static java.lang.System.currentTimeMillis;
 
 public class Game implements Runnable {
 
+    private static final ReadWriteLock timeOutLock = new ReentrantReadWriteLock();
+    private static final ReadWriteLock gameOverLock = new ReentrantReadWriteLock();
     private final SocketChannel mainServerSocket;
     private List<Player> players;
     private Map<String, Player> playerTokenMap;
+    private Map<String, Double> timeOutList = new HashMap<>();
     private String port;
     private String serverPrefix;
     private Selector selector;
     private ServerSocketChannel serverSocketChannel;
     private ServerCodes gamemode;
-    private boolean gameOver = false;
     private List<Player> winner;
     private List<Player> loser;
-    private int turnCount = 1, readyCount, actionCount;
+    private int turnCount = 1, readyCount;
+    private List<String> played = new ArrayList<>();
     private List<Player> team1 = new ArrayList<>();
     private List<Player> team2 = new ArrayList<>();
     private List<Player> playersReady = new ArrayList<>();
     private int team1HP, team2HP;
+    private volatile boolean gameOver = false;
     private boolean error;
+    private double timeOut = 10.0;
 
-    public Game(List<Player> players, String port, ServerCodes gamemode) throws IOException {
+
+    public Game(List<Player> players, ServerCodes gamemode) throws IOException {
         this.players = players;
-        this.port = port;
         this.gamemode = gamemode;
         this.selector = Selector.open();
-        this.serverPrefix = "[" + port + "]";
 
         switch (gamemode) {
             case N1, R1 -> {
                 this.readyCount = 2;
                 this.team1 = Arrays.asList(players.get(0));
                 this.team2 = Arrays.asList(players.get(1));
-                this.team1HP = 10;
-                this.team2HP = 10;
+                this.team1HP = 20;
+                this.team2HP = 20;
             }
             case N2, R2 -> {
                 this.readyCount = 4;
@@ -59,16 +66,19 @@ public class Game implements Runnable {
         }
 
         this.serverSocketChannel = ServerSocketChannel.open();
-        this.serverSocketChannel.bind(new InetSocketAddress("localhost" , Integer.parseInt(port)));
+        this.serverSocketChannel.bind(new InetSocketAddress("localhost" , 0));
         this.serverSocketChannel.configureBlocking(false);
         this.serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
-        
+
+        this.port = String.valueOf(serverSocketChannel.socket().getLocalPort());
+        this.serverPrefix = "[" + port + "]";
+
         this.mainServerSocket = SocketChannel.open(new InetSocketAddress("localhost", 9000));
         this.mainServerSocket.configureBlocking(true);
 
         this.playerTokenMap = players.stream().collect(Collectors.toMap(Player::getToken, player -> player));
 
-        System.out.println(serverPrefix + " Started game server.");
+        System.out.println(serverPrefix + " Started game server");
         System.out.print(serverPrefix + " Players:");
         for (Player p : players) {
             System.out.print(" " + p.getName());
@@ -78,6 +88,13 @@ public class Game implements Runnable {
 
     @Override
     public void run() {
+        Thread timeoutThread = new Thread(() -> {
+            while (!gameOver) {
+                checkTimeouts();
+            }
+        });
+        timeoutThread.start();
+
         while (!gameOver) {
             try {
                 selector.select();
@@ -91,30 +108,62 @@ public class Game implements Runnable {
                 }
                 if (key.isAcceptable()) {
                     try {
-                        System.out.println("Acceptable");
                         accept(key);
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
                 } else if (key.isReadable()) {
                     try {
-                        System.out.println("Readable");
                         read(key);
-                        System.out.println("after game read");
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
                 }
             }
         }
-        System.out.println(serverPrefix + " Game over!");
+
+        System.out.println(serverPrefix + " Game over");
         closeServer();
+    }
+
+    private void checkTimeouts() {
+        timeOutLock.readLock().lock();
+        try {
+            if (timeOutList.size() != 0) {
+                for (Map.Entry<String, Double> entry: timeOutList.entrySet()) {
+                    double timePassed = (double) currentTimeMillis()/1000 -  entry.getValue()/1000;
+                    if (timePassed >= timeOut) {
+                        System.out.println("timeout");
+                        for (Player p: players) {
+                            if (p.getName() != entry.getKey() && !timeOutList.containsKey(p.getName())) {
+                                try {
+                                    write(p.getGameChannel(), GameCodes.CANCEL.toString());
+                                    disconnect(p.getGameChannel());
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            }
+                        }
+
+                        this.gameOver = true;
+                        return;
+                    }
+                }
+            }
+        } finally {
+            timeOutLock.readLock().unlock();
+        }
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     private void closeServer() {
         String endGameString;
         if (this.error) {
-            endGameString = ServerCodes.GG + "," + ServerCodes.ERR + "," + this.port;
+            endGameString = ServerCodes.GG + "," + ServerCodes.ERR + "," + this.port + "," + String.join(",", this.players.stream().map(Player::getName).toList());
         } else {
             String winnerStr = String.join("-", this.winner.stream().map(Player::getName).toList());
             String loserStr = String.join("-", this.loser.stream().map(Player::getName).toList());
@@ -145,16 +194,56 @@ public class Game implements Runnable {
         SocketChannel socketChannel = (SocketChannel) key.channel();
         ByteBuffer buffer = ByteBuffer.allocate(1024);
         int bytesRead = 0;
-
         try {
             bytesRead = socketChannel.read(buffer);
-        } catch (SocketException e) {
-            disconnect(socketChannel);
+        } catch (IOException e) {
+            timeOutLock.writeLock().lock();
+            timeOutLock.readLock().lock();
+            try {
+                for (Player p: players) {
+                    if (p.getGameChannel() == socketChannel && !timeOutList.containsKey(p.getName())) {
+                        // key.cancel();
+                        timeOutList.put(p.getName(), (double) currentTimeMillis());
+
+                        List<Player> connectedPlayers = players.stream().filter(player -> {
+                            return player.getGameChannel() != socketChannel && !timeOutList.containsKey(player.getName());
+                        }).toList();
+
+                        String dcMsg = GameCodes.DISCONNECT.toString();
+                        broadcast(dcMsg, connectedPlayers);
+
+                        break;
+                    }
+                }
+            } finally {
+                timeOutLock.writeLock().unlock();
+                timeOutLock.readLock().unlock();
+            }
+
             return;
         }
 
         if (bytesRead == -1) {
-            disconnect(socketChannel);
+            timeOutLock.writeLock().lock();
+            try {
+                for (Player p : players) {
+                    if (p.getGameChannel() == socketChannel) {
+                        timeOutList.put(p.getName(), (double) currentTimeMillis());
+                        break;
+                    }
+                }
+            } finally {
+                timeOutLock.writeLock().unlock();
+            }
+
+            key.cancel();
+
+            List<Player> connectedPlayers = players.stream().filter(p -> {
+                return p.getSocketChannel() != socketChannel;
+            }).toList();
+            String dcMsg = GameCodes.DISCONNECT.toString();
+            broadcast(dcMsg, connectedPlayers);
+
             return;
         }
 
@@ -164,11 +253,35 @@ public class Game implements Runnable {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
+        System.out.println(message);
 
         GameCodes code = GameCodes.valueOf(message.get(0));
         String token = message.get(1);
 
+        List<String> team1Names = team1.stream().map(Player::getName).toList();
+        List<String> team2Names = team2.stream().map(Player::getName).toList();
+        String team1String = String.join("-", team1Names);
+        String team2String = String.join("-", team2Names);
+
         switch (code) {
+            case RECONNECT:
+                playerTokenMap.get(token).setGameChannel(socketChannel);
+                for (Player p: players) {
+                    if (p.getName().equals(message.get(2))) {
+                        p.setGameChannel(socketChannel);
+                    }
+
+                    String reconnectMsg;
+
+                    if (played.contains(p.getToken())) {
+                        reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "False";
+                    } else {
+                        reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "True";
+                    }
+                    write(p.getGameChannel(), reconnectMsg);
+                }
+
+                break;
             case ERR:
                 System.out.println(serverPrefix + " FATAL ERROR - CLOSING SERVER");
                 this.error = true;
@@ -180,29 +293,28 @@ public class Game implements Runnable {
                     player.setGameChannel(socketChannel);
                     if (!playersReady.contains(player)) playersReady.add(player);
                     if (playersReady.size() == readyCount) {
-                        List<String> team1Names = team1.stream().map(Player::getName).toList();
-                        List<String> team2Names = team2.stream().map(Player::getName).toList();
-                        String team1String = String.join(",", team1Names);
-                        String team2String = String.join(",", team2Names);
                         String startMessage = GameCodes.START + "," + team1String + "," + team2String;
                         broadcast(startMessage, players);
-                        String turnMessage = GameCodes.TURN + "," + turnCount;
+                        String turnMessage = GameCodes.TURN + "," + turnCount + "," + team1HP + "," + team2HP;
                         broadcast(turnMessage, players);
                     }
                 }
                 break;
             case ACTION:
-                if (verifyToken(token)) {
+                if (verifyToken(token) && !played.contains(token)) {
+                    played.add(token);
                     GameCodes actionType = GameCodes.valueOf(message.get(2));
                     resolveAction(actionType, token);
                     switch (gamemode) {
                         case N1, R1 -> {
-                            if (actionCount == 2) {
+                            if (played.size() == 2) {
+                                played.clear();
                                 newTurn();
                             }
                         }
                         case N2, R2 -> {
-                            if (actionCount == 4) {
+                            if (played.size() == 4) {
+                                played.clear();
                                 newTurn();
                             }
                         }
@@ -216,21 +328,19 @@ public class Game implements Runnable {
 
     private void newTurn() throws IOException {
         if (team1HP <= 0) {
-            System.out.println("team 2 wins");
+            System.out.println(serverPrefix + " Team 2 wins");
             endGame(team2, team1);
         } else if (team2HP <= 0) {
-            System.out.println("team 1 wins");
+            System.out.println(serverPrefix + " Team 1 wins");
             endGame(team1, team2);
         } else {
             turnCount++;
-            String turnMessage = GameCodes.TURN + "," + turnCount;
+            String turnMessage = GameCodes.TURN +  "," + turnCount + "," + team1HP + "," + team2HP;
             broadcast(turnMessage, players);
-            System.out.println("after broadcast turn");
         }
     }
 
     private void resolveAction(GameCodes actionType, String token) throws IOException {
-        System.out.println("hi");
         Random random = new Random();
         int damage = 0, selfdamage = 0;
 
@@ -249,10 +359,8 @@ public class Game implements Runnable {
             }
         }
 
-        System.out.println("damage = " + damage);
-        System.out.println("selfdamage = " + selfdamage);
         Player player = playerTokenMap.get(token);
-        System.out.println(player);
+
         if (team1.contains(player)) {
             team2HP -= damage;
             team1HP -= selfdamage;
@@ -260,11 +368,10 @@ public class Game implements Runnable {
             team1HP -= damage;
             team2HP -= selfdamage;
         }
-        String update = GameCodes.UPDATE + "," + player.getName() + "," + damage + "," + team1HP + "," + team2HP;
-        System.out.println(update);
-        broadcast(update, players);
 
-        actionCount++;
+        // tell the player what they did
+        String update = GameCodes.UPDATE + "," + damage;
+        write(player.getGameChannel(), update);
     }
 
     private boolean verifyToken(String token) {
@@ -275,7 +382,8 @@ public class Game implements Runnable {
     private void endGame(List<Player> winner, List<Player> loser) throws IOException {
         if (this.error) {
             for (Player p: players) {
-                disconnect(p.getSocketChannel());
+                write(p.getGameChannel(), GameCodes.CANCEL.toString());
+                disconnect(p.getGameChannel());
             }
             this.gameOver = true;
             return;
@@ -313,69 +421,10 @@ public class Game implements Runnable {
     private void disconnect(SocketChannel socketChannel) throws IOException {
         System.out.println(serverPrefix + " Client player disconnected");
 
-        Player disconnectedPlayer = null;
-        for (Player player : players) {
-            if (player.getGameChannel() == socketChannel) {
-                disconnectedPlayer = player;
-                break;
-            }
-        }
-
-        Iterator<SelectionKey> iterator = selector.selectedKeys().iterator();
-        while (iterator.hasNext()) {
-            SelectionKey key = iterator.next();
-            if (key.channel() == socketChannel) {
-                key.cancel();
-                break;
-            }
-        }
         socketChannel.close();
+    }
 
-
-        if (disconnectedPlayer != null) {
-            List<Player> temp = new ArrayList<Player>();
-            for (Player player : players) {
-                if (player.getGameChannel().isOpen()) {
-                    temp.add(player);
-                }
-            }
-            if (temp.size() == 0) {
-                // All players have disconnected
-                for (Player p: players) {
-                    if (p.getGameChannel().isOpen()) {
-                        p.getGameChannel().close();
-                    }
-                }
-                this.gameOver = true;
-                this.error = true;
-            } else {
-                // Notify the remaining players about the disconnection
-                String disconnectionMessage = GameCodes.DISCONNECT + "," + disconnectedPlayer.getName();
-                broadcast(disconnectionMessage, temp);
-
-                try {
-                    Thread.sleep(15000);
-                } catch (InterruptedException e) {
-
-                }
-
-
-                if (disconnectedPlayer.getGameChannel().isOpen()) {
-                    String reconnectionMessage = GameCodes.RECONNECT + "," + disconnectedPlayer.getName();
-                    broadcast(reconnectionMessage, temp);
-                }
-                else{
-                    for (Player p: players) {
-                        if (p.getGameChannel().isOpen()) {
-                            p.getGameChannel().close();
-                        }
-                    }
-                    this.gameOver = true;
-                    this.error = true;
-                }
-            }
-        }
-
-
+    public String getPort() {
+        return this.port;
     }
 }

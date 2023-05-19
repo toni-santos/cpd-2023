@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.nio.channels.SocketChannel;
 
 public class Player {
-    private final SocketChannel socketChannel;
+    private SocketChannel socketChannel;
     private SocketChannel gameChannel;
     private String name;
     private String elo;
@@ -41,6 +41,10 @@ public class Player {
         return socketChannel;
     }
 
+    public void setSocketChannel(SocketChannel socketChannel) {
+        this.socketChannel = socketChannel;
+    }
+
     public String getToken() {
         return token;
     }
@@ -52,19 +56,22 @@ public class Player {
     public SocketChannel getGameChannel() {
         return gameChannel;
     }
-    public double getSearchTime() { return searchTime; }
-
-    public void setSearchTime() { this.searchTime = System.currentTimeMillis(); }
-    public double getEloRange() { return eloRange; }
-    public void setEloRange(double currentTime) { this.eloRange = currentTime; }
 
     public void setGameChannel(SocketChannel gameChannel) {
         this.gameChannel = gameChannel;
     }
 
+    public double getSearchTime() { return searchTime; }
+
+    public void setSearchTime() { this.searchTime = System.currentTimeMillis(); }
+
+    public double getEloRange() { return eloRange; }
+
+    public void setEloRange(double currentTime) { this.eloRange = currentTime; }
+
     public boolean equals(Object obj) {
         if (obj instanceof Player p) {
-            return this.socketChannel == p.socketChannel;
+            return this.socketChannel == p.getSocketChannel() || this.name.equals(p.getName());
         }
         return false;
     }

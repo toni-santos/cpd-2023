@@ -15,12 +15,33 @@ dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter'
 }
 
-test {
-    useJUnitPlatform()
+sourceSets {
+    main {
+        java {
+            srcDirs 'src/main/java'
+        }
+    }
+
+    test {
+        java {
+            srcDirs 'src/test/java'
+        }
+    }
 }
 
-jar{
-    manifest{
-        attributes "Main-Class": "main.App"
-    }
+task Client(type: JavaExec) {
+    group = 'main'
+    description = 'Runs the Client application'
+    classpath = sourceSets.main.runtimeClasspath
+    main = 'client.Client'
+    standardInput = System.in
+    args "localhost", "9000"
+}
+
+task Server(type: JavaExec) {
+    group = 'main'
+    description = 'Runs the Server application'
+    classpath = sourceSets.main.runtimeClasspath
+    main = 'server.Server'
+    args "9000"
 }

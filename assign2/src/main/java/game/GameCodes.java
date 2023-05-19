@@ -14,6 +14,7 @@ public enum GameCodes {
     L,
     DISCONNECT,
     RECONNECT,
+    CANCEL,
 
     // Action Types
     D6,
