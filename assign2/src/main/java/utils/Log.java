@@ -29,4 +29,5 @@ public class Log {
     public static String GAME(String message) { return ANSI_BLUE + message + ANSI_RESET; }
 
     public static String RED_EMPHASIS(String message) { return ANSI_RED + message + ANSI_RESET;  }
+    public static String GREEN_EMPHASIS(String message) { return ANSI_GREEN + message + ANSI_RESET;  }
 }

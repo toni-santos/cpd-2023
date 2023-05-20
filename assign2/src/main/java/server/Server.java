@@ -246,28 +246,63 @@ public class Server {
         R2Lock.readLock().lock();
         waitListLock.writeLock().lock();
         waitListLock.readLock().lock();
+        System.out.println(normal1v1);
         try {
             if (normal1v1.size() >= 2) {
                 System.out.println(REGULAR("Found a 1v1 Normal game"));
-                N1Game = true;
-                Player player1 = normal1v1.get(0);
-                Player player2 = normal1v1.get(1);
-                N1Players = Arrays.asList(player1, player2);
+                List<Player> temp = new ArrayList<>();
+                for (Player p : normal1v1) {
+                    timeOutLock.readLock().lock();
+                    try {
+                        if (!timeOutList.containsKey(p.getName())) {
+                            temp.add(p);
+                        }
+                    } finally {
+                        timeOutLock.readLock().unlock();
+                    }
+                    if (temp.size() == 2) {
+                        N1Game = true;
+                        N1Players = temp;
+                        break;
+                    }
+                }
             }
             if (normal2v2.size() >= 4) {
                 System.out.println(REGULAR("Found a 2v2 Normal game"));
-                N2Game = true;
-                Player player1 = normal2v2.get(0);
-                Player player2 = normal2v2.get(1);
-                Player player3 = normal2v2.get(2);
-                Player player4 = normal2v2.get(3);
-                N2Players = Arrays.asList(player1, player2, player3, player4);
+                List<Player> temp = new ArrayList<>();
+                for (Player p : normal1v1) {
+                    timeOutLock.readLock().lock();
+                    try {
+                        if (!timeOutList.containsKey(p.getName())) {
+                            temp.add(p);
+                        }
+                    } finally {
+                        timeOutLock.readLock().unlock();
+                    }
+                    if (temp.size() == 4) {
+                        N2Game = true;
+                        N2Players = temp;
+                        break;
+                    }
+                }
             }
             if (waitingForRanked1v1.size() >= 2) {
-                Player player1 = waitingForRanked1v1.get(0);
-                Player player2 = waitingForRanked1v1.get(1);
-                R1Game = true;
-                R1Players = Arrays.asList(player1, player2);
+                List<Player> temp = new ArrayList<>();
+                for (Player p: waitingForRanked1v1) {
+                    timeOutLock.readLock().lock();
+                    try {
+                        if (!timeOutList.containsKey(p.getName())) {
+                            temp.add(p);
+                        }
+                    } finally {
+                        timeOutLock.readLock().unlock();
+                    }
+                    if (temp.size() == 4) {
+                        R1Game = true;
+                        R1Players = temp;
+                        break;
+                    }
+                }
             }
             else if (ranked1v1.size() >= 2) {
                 for (int i = 0; i < ranked1v1.size() - 1; i++) {
@@ -294,12 +329,22 @@ public class Server {
                 }
             }
             if (waitingForRanked2v2.size() >= 4) {
-                Player player1 = waitingForRanked2v2.get(0);
-                Player player2 = waitingForRanked2v2.get(1);
-                Player player3 = waitingForRanked2v2.get(2);
-                Player player4 = waitingForRanked2v2.get(3);
-                R2Game = true;
-                R2Players = Arrays.asList(player1, player2, player3, player4);
+                List<Player> temp = new ArrayList<>();
+                for (Player p: waitingForRanked2v2) {
+                    timeOutLock.readLock().lock();
+                    try {
+                        if (!timeOutList.containsKey(p.getName())) {
+                            temp.add(p);
+                        }
+                    } finally {
+                        timeOutLock.readLock().unlock();
+                    }
+                    if (temp.size() == 4) {
+                        R2Game = true;
+                        R2Players = temp;
+                        break;
+                    }
+                }
             }
             else if (ranked2v2.size() >= 4) {
                 for (int i = 0; i < ranked2v2.size() - 3; i++) {
@@ -607,7 +652,13 @@ public class Server {
 
                         updateLists(socketChannel, queue, p);
                         write(socketChannel, response);
-
+                        if (pos != null && pos.equals(ServerCodes.Q)) {
+                            try {
+                                checkMatchmaking();
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                        }
                     } else {
                         // generate tokens, get elo, etcetc
                         String token = TokenGenerator.generateToken();

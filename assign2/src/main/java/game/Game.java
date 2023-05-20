@@ -252,7 +252,6 @@ public class Game implements Runnable {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
-
         GameCodes code = GameCodes.valueOf(message.get(0));
         String token = message.get(1);
 
@@ -359,6 +358,11 @@ public class Game implements Runnable {
             endGame(team1, team2);
         } else {
             turnCount++;
+            try {
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
             String turnMessage = GameCodes.TURN +  "," + turnCount + "," + team1HP + "," + team2HP;
             broadcast(turnMessage, players);
         }
@@ -384,7 +388,6 @@ public class Game implements Runnable {
         }
 
         Player player = playerTokenMap.get(token);
-
         if (team1.contains(player)) {
             team2HP -= damage;
             team1HP -= selfdamage;

@@ -70,7 +70,8 @@ public class Client {
         this.gameSocket = SocketChannel.open(new InetSocketAddress(HOSTNAME, this.gamePort));
         this.gameSocket.configureBlocking(false);
         this.gameSocket.register(gameSelector, SelectionKey.OP_READ);
-
+        this.gameOver = false;
+        this.inputing = false;
         if (this.reconnected == ServerCodes.G) {
             this.reconnected = null;
 
@@ -120,7 +121,7 @@ public class Client {
             case CANCEL -> {
                 System.out.println(ERROR("Game cancelled, GGs!"));
                 disconnect(gameSocket);
-                gameSelector.close();
+                this.gameSelector.close();
                 this.inputing = false;
                 this.gameOver = true;
             }
@@ -135,10 +136,12 @@ public class Client {
             case GG -> {
                 GameCodes result = GameCodes.valueOf(message.get(1));
                 if (result == GameCodes.W) {
-                    System.out.println(GAME("You Won!\nReturning to main menu..."));
+                    System.out.println(GREEN_EMPHASIS("You Won!\nReturning to main menu..."));
                 } else if (result == GameCodes.L) {
-                    System.out.println(GAME("You Lost!\nReturning to main menu..."));
+                    System.out.println(RED_EMPHASIS("You Lost!\nReturning to main menu..."));
                 }
+                this.gameSelector.close();
+                disconnect(gameSocket);
                 this.gameOver = true;
             }
             case UPDATE -> {
@@ -147,7 +150,7 @@ public class Client {
                 System.out.println(GAME("You dealt " + damage + "!"));
             }
             case DISCONNECT -> {
-                System.out.println(GAME("A player has lost connection!\nWaiting 45 seconds for them to reconnect, if they don't the game will be cancelled!"));
+                System.out.println(RED_EMPHASIS("\nA player has lost connection!\nWaiting 45 seconds for them to reconnect, if they don't the game will be cancelled!"));
                 if (actionInputThread.isAlive()) this.inputing = false;
             }
             case RECONNECT -> {
@@ -194,12 +197,17 @@ public class Client {
             while (!validOp) {
                 try {
                     opt = scanner.nextInt();
+                    if (opt >= 1 && opt <= 3) {
+                        validOp = true;
+                    }
+                    System.out.println(opt);
                 } catch (InputMismatchException e) {
                     if (opt >= 1 && opt <= 3) {
                         validOp = true;
                     }
                 }
             }
+            System.out.println("opt " + opt);
             String actionString = "";
             switch (opt) {
                 case 1 -> {
