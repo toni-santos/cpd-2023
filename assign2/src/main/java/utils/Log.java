@@ -25,4 +25,8 @@ public class Log {
     public static String REGULAR(String message) {
         return ANSI_YELLOW + "[" + UNI_DOT + "] " + message + ANSI_RESET;
     }
+
+    public static String GAME(String message) { return ANSI_BLUE + message + ANSI_RESET; }
+
+    public static String RED_EMPHASIS(String message) { return ANSI_RED + message + ANSI_RESET;  }
 }

@@ -13,6 +13,9 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.*;
 
+import static utils.Log.*;
+import static utils.Log.GAME;
+
 /**
  * This program demonstrates a simple TCP/IP socket client.
  *
@@ -72,9 +75,8 @@ public class Client {
             this.reconnected = null;
 
             String reconnectString = GameCodes.RECONNECT + "," + token + "," + this.user;
-            int t = this.gameSocket.write(ByteBuffer.wrap(reconnectString.getBytes()));
-            System.out.println("t = " + t);
-            System.out.println("Reconnected to game!");
+            this.gameSocket.write(ByteBuffer.wrap(reconnectString.getBytes()));
+            System.out.println(SUCCESS("Reconnected to game!"));
         } else {
             String readyString = GameCodes.READY + "," + this.token;
             this.gameSocket.write(ByteBuffer.wrap(readyString.getBytes()));
@@ -101,7 +103,7 @@ public class Client {
         try {
             bytesRead = channel.read(buffer);
         } catch (SocketException e) {
-            System.out.println("Server went offline, exiting!");
+            System.out.println(ERROR("Server went offline, exiting!"));
             System.exit(0);
         }
         if (bytesRead == -1) {
@@ -112,11 +114,11 @@ public class Client {
         }
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
-        System.out.println(message);
+
         GameCodes code = GameCodes.valueOf(message.get(0));
         switch (code) {
             case CANCEL -> {
-                System.out.println("Game cancelled, GGs!");
+                System.out.println(ERROR("Game cancelled, GGs!"));
                 disconnect(gameSocket);
                 gameSelector.close();
                 this.inputing = false;
@@ -126,31 +128,31 @@ public class Client {
                 String turnNumber = message.get(1);
                 String team1HP = message.get(2);
                 String team2HP = message.get(3);
-                System.out.println("Turn " + turnNumber + "!");
-                System.out.println("Team 1 - " + team1HP + " | " + team2HP + " - Team 2");
+                System.out.println(GAME("Turn " + turnNumber + "!"));
+                System.out.println(GAME("Team 1 - " + team1HP + " | " + team2HP + " - Team 2"));
                 playerAction();
             }
             case GG -> {
                 GameCodes result = GameCodes.valueOf(message.get(1));
                 if (result == GameCodes.W) {
-                    System.out.println("You Won!\nReturning to main menu...");
+                    System.out.println(GAME("You Won!\nReturning to main menu..."));
                 } else if (result == GameCodes.L) {
-                    System.out.println("You Lost!\nReturning to main menu...");
+                    System.out.println(GAME("You Lost!\nReturning to main menu..."));
                 }
                 this.gameOver = true;
             }
             case UPDATE -> {
                 String damage = message.get(1);
 
-                System.out.println("You dealt " + damage + "!");
+                System.out.println(GAME("You dealt " + damage + "!"));
             }
             case DISCONNECT -> {
-                System.out.println("A player has lost connection!\nWaiting 45 seconds for them to reconnect, if they don't the game will be cancelled!");
+                System.out.println(GAME("A player has lost connection!\nWaiting 45 seconds for them to reconnect, if they don't the game will be cancelled!"));
                 if (actionInputThread.isAlive()) this.inputing = false;
             }
             case RECONNECT -> {
                 if (message.get(1).equals(GameCodes.DISCONNECT.toString())) {
-                    System.out.println("Not all players have reconnected, waiting...");
+                    System.out.println(GAME("Not all players have reconnected, waiting..."));
                 } else {
                     String turnNumber = message.get(1);
                     if (team1 == null) team1 = List.of(message.get(2).split("-"));
@@ -159,15 +161,15 @@ public class Client {
                     String team2HP = message.get(5);
                     boolean actionable = Boolean.parseBoolean(message.get(6));
 
-                    System.out.println("Game has been unpaused!");
-                    System.out.println("Turn " + turnNumber + "!");
-                    System.out.println("Team 1: " + team1 + " - " + team1HP);
-                    System.out.println("Team 2: " + team2 + " - " + team2HP);
+                    System.out.println(GAME("Game has been unpaused!"));
+                    System.out.println(GAME("Turn " + turnNumber + "!"));
+                    System.out.println(GAME("Team 1: " + team1 + " - " + team1HP));
+                    System.out.println(GAME("Team 2: " + team2 + " - " + team2HP));
 
                     if (actionable) {
                         playerAction();
                     } else {
-                        System.out.println("Waiting for the other player's actions");
+                        System.out.println(GAME("Waiting for the other player's actions"));
                     }
                 }
             }
@@ -176,12 +178,12 @@ public class Client {
     }
 
     private void playerAction() throws IOException {
-        System.out.print("""
+        System.out.print(GAME("""
                 Pick a dice to roll!
                 1. D6
                 2. D12
                 3. D20
-                -\s""");
+                -\s"""));
 
         this.inputing = true;
 
@@ -245,7 +247,7 @@ public class Client {
         try {
             this.serverSocket.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
         } catch (IOException e) {
-            System.out.println("Server went offline, exiting!");
+            System.out.println(ERROR("Server went offline, exiting!"));
             System.exit(0);
         }
 
@@ -254,7 +256,7 @@ public class Client {
         try {
             bytesRead = this.serverSocket.read(buffer);
         } catch (SocketException e) {
-            System.out.println("Server went offline, exiting!");
+            System.out.println(ERROR("Server went offline, exiting!"));
             System.exit(0);
         }
         if (bytesRead == -1) {
@@ -265,14 +267,14 @@ public class Client {
 
         if (ServerCodes.OK == ServerCodes.valueOf(message.get(0))) {
             if (opt == 1) {
-                System.out.println("Login successful!");
+                System.out.println(SUCCESS("Login successful!"));
             } else {
-                System.out.println("Register successful!");
+                System.out.println(SUCCESS("Register successful!"));
             }
             this.token = message.get(1);
             this.user = creds.get(1);
         } else if (ServerCodes.REC == ServerCodes.valueOf(message.get(0))) {
-            System.out.println("Reconnected successfully!");
+            System.out.println(SUCCESS("Reconnected successfully!"));
             if (message.size() > 2) {
                 if (message.get(2).equals((ServerCodes.Q).toString())) {
                     this.gamemode = ServerCodes.valueOf(message.get(3));
@@ -286,7 +288,7 @@ public class Client {
             this.token = message.get(1);
             this.user = creds.get(1);
         } else {
-            System.out.println("Login/register failed!");
+            System.out.println(ERROR("Login/register failed!"));
             return logInRegister();
         }
         return true;
@@ -319,13 +321,13 @@ public class Client {
     }
 
     private int search(String gamemode) throws IOException {
-        System.out.println("Searching...");
+        System.out.println(GAME("Searching..."));
         if (this.reconnected != ServerCodes.Q) {
             String req = gamemode + "," + this.token;
             try {
                 serverSocket.write(ByteBuffer.wrap(req.getBytes()));
             } catch (IOException e) {
-                System.out.println("Server went offline, exiting!");
+                System.out.println(ERROR("Server went offline, exiting!"));
                 System.exit(0);
             }
         } else {
@@ -337,7 +339,7 @@ public class Client {
         try {
             bytesRead = this.serverSocket.read(buffer);
         } catch (SocketException e) {
-            System.out.println("Server went offline, exiting!");
+            System.out.println(ERROR("Server went offline, exiting!"));
             System.exit(0);
         }
         if (bytesRead == -1) {
@@ -350,23 +352,23 @@ public class Client {
         String port = result.get(1);
 
         if (code == ServerCodes.GF) {
-            System.out.println("Game found! Waiting for lobby...");
+            System.out.println(SUCCESS("Game found! Waiting for lobby..."));
             return Integer.parseInt(port);
         } else {
-            System.out.println("Something went wrong!");
+            System.out.println(ERROR("Something went wrong!"));
         }
         return bytesRead;
     }
 
     private int gameModeSelection(Scanner consoleInput) {
-        System.out.print("Welcome " + this.user + "!\n" +
+        System.out.print(GAME("Welcome " + this.user + "!\n" +
                 "What would you like to do?\n" +
                 "1. 1v1 Normal\n" +
                 "2. 2v2 Normal\n" +
                 "3. 1v1 Ranked\n" +
                 "4. 2v2 Ranked\n" +
                 "5. Quit\n" +
-                "- ");
+                "- "));
         int opt = consoleInput.nextInt();
 
         switch (opt) {
@@ -374,7 +376,7 @@ public class Client {
                 return opt;
             }
             default -> {
-                System.out.println("Invalid input, try again!");
+                System.out.println(ERROR("Invalid input, try again!"));
                 return logInRegisterSelection(consoleInput);
             }
         }
@@ -388,19 +390,19 @@ public class Client {
     }
 
     private String getUsername(Scanner consoleInput) {
-        System.out.print("Username: ");
+        System.out.print(GAME("Username: "));
         String username = consoleInput.next();
 
         return username;
     }
 
     private String getPassword(Scanner consoleInput) {
-        System.out.print("Password: ");
+        System.out.print(GAME("Password: "));
         String password = consoleInput.next();
 
         //TODO: Change password lengths back to just < 8
         if (password.length() < 8 && password.length() > 1) {
-            System.out.println("Invalid password, try again!");
+            System.out.println(ERROR("Invalid password, try again!"));
             return getPassword(consoleInput);
         }
 
@@ -409,7 +411,7 @@ public class Client {
 
 
     private int logInRegisterSelection(Scanner consoleInput) {
-        System.out.print("1. Log In\n2. Register\n3. Quit\n- ");
+        System.out.print(GAME("1. Log In\n2. Register\n3. Quit\n- "));
 
         int opt = consoleInput.nextInt();
 
@@ -418,7 +420,7 @@ public class Client {
                 return opt;
             }
             default -> {
-                System.out.println("Invalid input, try again!");
+                System.out.println(ERROR("Invalid input, try again!"));
                 return logInRegisterSelection(consoleInput);
             }
         }
