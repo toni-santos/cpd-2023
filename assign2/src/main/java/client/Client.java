@@ -408,7 +408,6 @@ public class Client {
         System.out.print(GAME("Password: "));
         String password = consoleInput.next();
 
-        //TODO: Change password lengths back to just < 8
         if (password.length() < 8 && password.length() > 1) {
             System.out.println(ERROR("Invalid password, try again!"));
             return getPassword(consoleInput);

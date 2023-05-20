@@ -27,7 +27,6 @@ public class Server {
     private static final ReadWriteLock R1Lock = new ReentrantReadWriteLock();
     private static final ReadWriteLock N2Lock = new ReentrantReadWriteLock();
     private static final ReadWriteLock R2Lock = new ReentrantReadWriteLock();
-    private static final ReadWriteLock waitListLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock runThreadLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock timeOutLock = new ReentrantReadWriteLock();
     private static final ReadWriteLock inGameLock = new ReentrantReadWriteLock();
@@ -43,8 +42,6 @@ public class Server {
     private List<Player> normal2v2 = new ArrayList<>();
     private List<Player> ranked1v1 = new ArrayList<>();
     private List<Player> ranked2v2 = new ArrayList<>();
-    private List<Player> waitingForRanked1v1 = new ArrayList<>();
-    private List<Player> waitingForRanked2v2 = new ArrayList<>();
     private Boolean runThread = true;
 
     public Server(String port) throws IOException {
@@ -244,9 +241,6 @@ public class Server {
         R1Lock.readLock().lock();
         N2Lock.readLock().lock();
         R2Lock.readLock().lock();
-        waitListLock.writeLock().lock();
-        waitListLock.readLock().lock();
-        System.out.println(normal1v1);
         try {
             if (normal1v1.size() >= 2) {
                 System.out.println(REGULAR("Found a 1v1 Normal game"));
@@ -286,30 +280,11 @@ public class Server {
                     }
                 }
             }
-            if (waitingForRanked1v1.size() >= 2) {
-                List<Player> temp = new ArrayList<>();
-                for (Player p: waitingForRanked1v1) {
-                    timeOutLock.readLock().lock();
-                    try {
-                        if (!timeOutList.containsKey(p.getName())) {
-                            temp.add(p);
-                        }
-                    } finally {
-                        timeOutLock.readLock().unlock();
-                    }
-                    if (temp.size() == 4) {
-                        R1Game = true;
-                        R1Players = temp;
-                        break;
-                    }
-                }
-            }
-            else if (ranked1v1.size() >= 2) {
+            if (ranked1v1.size() >= 2) {
                 for (int i = 0; i < ranked1v1.size() - 1; i++) {
                     Player player1 = ranked1v1.get(i);
                     for (int j = i + 1; j < ranked1v1.size(); j++) {
                         Player player2 = ranked1v1.get(j);
-                        if (waitingForRanked1v1.contains(player2)) continue;
                         List<Player> playerArray = Arrays.asList(player1, player2);
                         boolean elosInRange = true;
                         for (Player player: playerArray) {
@@ -319,42 +294,19 @@ public class Server {
                             System.out.println(REGULAR("Found a 1v1 Ranked game"));
                             R1Game = true;
                             R1Players = Arrays.asList(player1, player2);
-                            for (Player player: R1Players) {
-                                if (!waitingForRanked1v1.contains(player)) waitingForRanked1v1.add(player);
-                            }
                         }
                         if (R1Game) break;
                     }
                     if (R1Game) break;
                 }
             }
-            if (waitingForRanked2v2.size() >= 4) {
-                List<Player> temp = new ArrayList<>();
-                for (Player p: waitingForRanked2v2) {
-                    timeOutLock.readLock().lock();
-                    try {
-                        if (!timeOutList.containsKey(p.getName())) {
-                            temp.add(p);
-                        }
-                    } finally {
-                        timeOutLock.readLock().unlock();
-                    }
-                    if (temp.size() == 4) {
-                        R2Game = true;
-                        R2Players = temp;
-                        break;
-                    }
-                }
-            }
-            else if (ranked2v2.size() >= 4) {
+            if (ranked2v2.size() >= 4) {
                 for (int i = 0; i < ranked2v2.size() - 3; i++) {
                     Player player1 = ranked2v2.get(i);
                     for (int j = i + 1; j < ranked2v2.size() - 2; j++) {
                         Player player2 = ranked2v2.get(j);
                         Player player3 = ranked2v2.get(j+1);
                         Player player4 = ranked2v2.get(j+2);
-                        if (waitingForRanked2v2.contains(player2) || waitingForRanked2v2.contains(player3)
-                        || waitingForRanked2v2.contains(player4)) continue;
                         List<Player> playerArray = Arrays.asList(player1, player2, player3, player4);
                         boolean elosInRange = true;
                         for (Player player: playerArray) {
@@ -364,9 +316,6 @@ public class Server {
                             System.out.println(REGULAR("Found a 2v2 Ranked game"));
                             R2Game = true;
                             R2Players = balanceTeams(playerArray);
-                            for (Player player: R2Players) {
-                                if (!waitingForRanked2v2.contains(player)) waitingForRanked2v2.add(player);
-                            }
                         }
                         if (R2Game) break;
                     }
@@ -374,16 +323,14 @@ public class Server {
                 }
             }
 
-            updateEloRange(ranked1v1, waitingForRanked1v1);
-            updateEloRange(ranked2v2, waitingForRanked2v2);
+            updateEloRange(ranked1v1);
+            updateEloRange(ranked2v2);
 
         } finally {
             N1Lock.readLock().unlock();
             R1Lock.readLock().unlock();
             N2Lock.readLock().unlock();
             R2Lock.readLock().unlock();
-            waitListLock.writeLock().unlock();
-            waitListLock.readLock().unlock();
         }
 
         if (N1Game) {
@@ -404,22 +351,18 @@ public class Server {
         }
         if (R1Game) {
             R1Lock.writeLock().lock();
-            waitListLock.writeLock().lock();
             try {
                 startGame(ServerCodes.R1, R1Players);
             } finally {
                 R1Lock.writeLock().unlock();
-                waitListLock.writeLock().unlock();
             }
         }
         if (R2Game){
             R2Lock.writeLock().lock();
-            waitListLock.writeLock().lock();
             try {
                 startGame(ServerCodes.R2, R2Players);
             } finally {
                 R2Lock.writeLock().unlock();
-                waitListLock.writeLock().unlock();
             }
         }
     }
@@ -467,10 +410,9 @@ public class Server {
         }
     }
 
-    private void updateEloRange(List<Player> playerList, List<Player> waitList) {
+    private void updateEloRange(List<Player> playerList) {
         double currentSearchTime = System.currentTimeMillis();
         for (Player player : playerList) {
-            if (waitList.contains(player)) continue;
             player.setEloRange((currentSearchTime - player.getSearchTime()) / 100);
         }
     }
@@ -516,13 +458,11 @@ public class Server {
                 lock = R1Lock;
                 lock.readLock().lock();
                 list = ranked1v1;
-                waitList = waitingForRanked1v1;
             }
             case R2 -> {
                 lock = R2Lock;
                 lock.readLock().lock();
                 list = ranked2v2;
-                waitList = waitingForRanked2v2;
             }
         }
         try {
@@ -866,32 +806,20 @@ public class Server {
                 }
                 case R1 -> {
                     R1Lock.writeLock().lock();
-                    waitListLock.writeLock().lock();
                     try {
                         ranked1v1.forEach(p -> {
                             if (p == player) {
                                 p.setSocketChannel(socketChannel);
                             }
                         });
-                        waitingForRanked1v1.forEach(p -> {
-                            if (p == player) {
-                                p.setSocketChannel(socketChannel);
-                            }
-                        });
                     } finally {
                         R1Lock.writeLock().unlock();
-                        waitListLock.writeLock().unlock();
                     }
                 }
                 case R2 -> {
                     R2Lock.writeLock().lock();
                     try {
                         ranked2v2.forEach(p -> {
-                            if (p == player) {
-                                p.setSocketChannel(socketChannel);
-                            }
-                        });
-                        waitingForRanked2v2.forEach(p -> {
                             if (p == player) {
                                 p.setSocketChannel(socketChannel);
                             }
