@@ -13,8 +13,6 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.*;
 
-import static server.ServerCodes.GG;
-
 /**
  * This program demonstrates a simple TCP/IP socket client.
  *
@@ -74,7 +72,8 @@ public class Client {
             this.reconnected = null;
 
             String reconnectString = GameCodes.RECONNECT + "," + token + "," + this.user;
-            this.gameSocket.write(ByteBuffer.wrap(reconnectString.getBytes()));
+            int t = this.gameSocket.write(ByteBuffer.wrap(reconnectString.getBytes()));
+            System.out.println("t = " + t);
             System.out.println("Reconnected to game!");
         } else {
             String readyString = GameCodes.READY + "," + this.token;
@@ -123,14 +122,6 @@ public class Client {
                 this.inputing = false;
                 this.gameOver = true;
             }
-            case START -> {
-                this.team1 = List.of(message.get(1).split("-"));
-                this.team2 = List.of(message.get(2).split("-"));
-
-                System.out.println("\nGame Started!\n");
-                System.out.println(String.join(" ", team1) + " vs " + String.join(" ", team2));
-
-            }
             case TURN -> {
                 String turnNumber = message.get(1);
                 String team1HP = message.get(2);
@@ -158,22 +149,26 @@ public class Client {
                 if (actionInputThread.isAlive()) this.inputing = false;
             }
             case RECONNECT -> {
-                String turnNumber = message.get(1);
-                if (team1 == null) team1 = List.of(message.get(2).split("-"));
-                if (team2 == null) team2 = List.of(message.get(3).split("-"));
-                String team1HP = message.get(4);
-                String team2HP = message.get(5);
-                boolean actionable = Boolean.parseBoolean(message.get(6));
-
-                System.out.println("Game has been unpaused!");
-                System.out.println("Turn " + turnNumber + "!");
-                System.out.println("Team 1: " + team1 + " - " + team1HP);
-                System.out.println("Team 2: " + team2 + " - " + team2HP);
-
-                if (actionable) {
-                    playerAction();
+                if (message.get(1).equals(GameCodes.DISCONNECT.toString())) {
+                    System.out.println("Not all players have reconnected, waiting...");
                 } else {
-                    System.out.println("Waiting for the other player's actions");
+                    String turnNumber = message.get(1);
+                    if (team1 == null) team1 = List.of(message.get(2).split("-"));
+                    if (team2 == null) team2 = List.of(message.get(3).split("-"));
+                    String team1HP = message.get(4);
+                    String team2HP = message.get(5);
+                    boolean actionable = Boolean.parseBoolean(message.get(6));
+
+                    System.out.println("Game has been unpaused!");
+                    System.out.println("Turn " + turnNumber + "!");
+                    System.out.println("Team 1: " + team1 + " - " + team1HP);
+                    System.out.println("Team 2: " + team2 + " - " + team2HP);
+
+                    if (actionable) {
+                        playerAction();
+                    } else {
+                        System.out.println("Waiting for the other player's actions");
+                    }
                 }
             }
         }
@@ -191,36 +186,34 @@ public class Client {
         this.inputing = true;
 
         this.actionInputThread = new Thread(() -> {
-            while (inputing) {
-                Scanner scanner = new Scanner(System.in);
-                int opt = scanner.nextInt();
-                String actionString = "";
-                switch (opt) {
-                    case 1 -> {
-                        actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D6;
-                    }
-                    case 2 -> {
-                        actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D12;
-                    }
-                    case 3 -> {
-                        actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D20;
-                    }
-                    default -> {
-                        System.out.println("Invalid input, try again!");
-                        try {
-                            playerAction();
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }
-
-                }
+            Scanner scanner = new Scanner(System.in);
+            int opt = 0;
+            boolean validOp = false;
+            while (!validOp) {
                 try {
-                    gameSocket.write(ByteBuffer.wrap(actionString.getBytes()));
-                } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    opt = scanner.nextInt();
+                } catch (InputMismatchException e) {
+                    if (opt >= 1 && opt <= 3) {
+                        validOp = true;
+                    }
                 }
-                inputing = false;
+            }
+            String actionString = "";
+            switch (opt) {
+                case 1 -> {
+                    actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D6;
+                }
+                case 2 -> {
+                    actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D12;
+                }
+                case 3 -> {
+                    actionString = GameCodes.ACTION + "," + token + "," + GameCodes.D20;
+                }
+            }
+            try {
+                gameSocket.write(ByteBuffer.wrap(actionString.getBytes()));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
             }
         });
         actionInputThread.start();
@@ -249,11 +242,21 @@ public class Client {
             case 1 -> creds.add(0, String.valueOf(ServerCodes.LOG));
             case 2 -> creds.add(0, String.valueOf(ServerCodes.REG));
         }
-
-        this.serverSocket.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+        try {
+            this.serverSocket.write(ByteBuffer.wrap(String.join(",", creds).getBytes()));
+        } catch (IOException e) {
+            System.out.println("Server went offline, exiting!");
+            System.exit(0);
+        }
 
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = this.serverSocket.read(buffer);
+        int bytesRead = 0;
+        try {
+            bytesRead = this.serverSocket.read(buffer);
+        } catch (SocketException e) {
+            System.out.println("Server went offline, exiting!");
+            System.exit(0);
+        }
         if (bytesRead == -1) {
             return false;
         }
@@ -304,6 +307,7 @@ public class Client {
                 this.gamemode = ServerCodes.valueOf("R" + (opt - 2));
                 return search("R" + (opt - 2));
             case 5:
+                serverSocket.write(ByteBuffer.wrap(ServerCodes.DC.toString().getBytes()));
                 disconnect(this.serverSocket);
                 return -1;
         }
@@ -318,14 +322,24 @@ public class Client {
         System.out.println("Searching...");
         if (this.reconnected != ServerCodes.Q) {
             String req = gamemode + "," + this.token;
-            System.out.println(req);
-            serverSocket.write(ByteBuffer.wrap(req.getBytes()));
+            try {
+                serverSocket.write(ByteBuffer.wrap(req.getBytes()));
+            } catch (IOException e) {
+                System.out.println("Server went offline, exiting!");
+                System.exit(0);
+            }
         } else {
             this.reconnected = null;
         }
 
         ByteBuffer buffer = ByteBuffer.allocate(1024);
-        int bytesRead = this.serverSocket.read(buffer);
+        int bytesRead = 0;
+        try {
+            bytesRead = this.serverSocket.read(buffer);
+        } catch (SocketException e) {
+            System.out.println("Server went offline, exiting!");
+            System.exit(0);
+        }
         if (bytesRead == -1) {
             return bytesRead;
         }

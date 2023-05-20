@@ -1,5 +1,7 @@
 package game;
 
+import java.nio.ByteBuffer;
+
 public enum GameCodes {
     // Control codes
     START,
@@ -15,9 +17,11 @@ public enum GameCodes {
     DISCONNECT,
     RECONNECT,
     CANCEL,
+    OK,
 
     // Action Types
     D6,
     D12,
-    D20
+    D20;
+
 }

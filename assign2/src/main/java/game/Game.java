@@ -16,6 +16,7 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.stream.Collectors;
 
 import static java.lang.System.currentTimeMillis;
+import static utils.Log.*;
 
 public class Game implements Runnable {
 
@@ -40,7 +41,7 @@ public class Game implements Runnable {
     private int team1HP, team2HP;
     private volatile boolean gameOver = false;
     private boolean error;
-    private double timeOut = 10.0;
+    private double timeOut = 40.0;
 
 
     public Game(List<Player> players, ServerCodes gamemode) throws IOException {
@@ -78,12 +79,7 @@ public class Game implements Runnable {
 
         this.playerTokenMap = players.stream().collect(Collectors.toMap(Player::getToken, player -> player));
 
-        System.out.println(serverPrefix + " Started game server");
-        System.out.print(serverPrefix + " Players:");
-        for (Player p : players) {
-            System.out.print(" " + p.getName());
-        }
-        System.out.println();
+        System.out.println(SUCCESS(serverPrefix + " Started game server"));
     }
 
     @Override
@@ -116,13 +112,14 @@ public class Game implements Runnable {
                     try {
                         read(key);
                     } catch (IOException e) {
+                        System.out.println(e);
                         throw new RuntimeException(e);
                     }
                 }
             }
         }
 
-        System.out.println(serverPrefix + " Game over");
+        System.out.println(REGULAR(serverPrefix + " Game over"));
         closeServer();
     }
 
@@ -133,9 +130,8 @@ public class Game implements Runnable {
                 for (Map.Entry<String, Double> entry: timeOutList.entrySet()) {
                     double timePassed = (double) currentTimeMillis()/1000 -  entry.getValue()/1000;
                     if (timePassed >= timeOut) {
-                        System.out.println("timeout");
                         for (Player p: players) {
-                            if (p.getName() != entry.getKey() && !timeOutList.containsKey(p.getName())) {
+                            if (!p.getName().equals(entry.getKey()) && !timeOutList.containsKey(p.getName())) {
                                 try {
                                     write(p.getGameChannel(), GameCodes.CANCEL.toString());
                                     disconnect(p.getGameChannel());
@@ -187,7 +183,7 @@ public class Game implements Runnable {
         socketChannel.configureBlocking(false);
         socketChannel.register(selector, SelectionKey.OP_READ);
 
-        System.out.println(serverPrefix + " Player connected to game on socket " + socketChannel.getRemoteAddress());
+        System.out.println(SUCCESS(serverPrefix + " Player connected to game on socket " + socketChannel.getRemoteAddress()));
     }
 
     private void read(SelectionKey key) throws IOException {
@@ -225,24 +221,27 @@ public class Game implements Runnable {
 
         if (bytesRead == -1) {
             timeOutLock.writeLock().lock();
+            timeOutLock.readLock().lock();
             try {
-                for (Player p : players) {
-                    if (p.getGameChannel() == socketChannel) {
+                for (Player p: players) {
+                    if (p.getGameChannel() == socketChannel && !timeOutList.containsKey(p.getName())) {
+                        // key.cancel();
                         timeOutList.put(p.getName(), (double) currentTimeMillis());
+
+                        List<Player> connectedPlayers = players.stream().filter(player -> {
+                            return player.getGameChannel() != socketChannel && !timeOutList.containsKey(player.getName());
+                        }).toList();
+
+                        String dcMsg = GameCodes.DISCONNECT.toString();
+                        broadcast(dcMsg, connectedPlayers);
+
                         break;
                     }
                 }
             } finally {
                 timeOutLock.writeLock().unlock();
+                timeOutLock.readLock().unlock();
             }
-
-            key.cancel();
-
-            List<Player> connectedPlayers = players.stream().filter(p -> {
-                return p.getSocketChannel() != socketChannel;
-            }).toList();
-            String dcMsg = GameCodes.DISCONNECT.toString();
-            broadcast(dcMsg, connectedPlayers);
 
             return;
         }
@@ -253,7 +252,6 @@ public class Game implements Runnable {
 
         String rawMessage = new String(buffer.array()).trim();
         List<String> message = List.of(rawMessage.split(","));
-        System.out.println(message);
 
         GameCodes code = GameCodes.valueOf(message.get(0));
         String token = message.get(1);
@@ -265,6 +263,23 @@ public class Game implements Runnable {
 
         switch (code) {
             case RECONNECT:
+                timeOutLock.writeLock().lock();
+                try {
+                    timeOutList.remove(message.get(2));
+                } finally {
+                    timeOutLock.writeLock().unlock();
+                }
+                boolean continueGame = false;
+
+                timeOutLock.readLock().lock();
+                try {
+                    if (timeOutList.isEmpty()) {
+                        continueGame = true;
+                    }
+                } finally {
+                    timeOutLock.readLock().unlock();
+                }
+
                 playerTokenMap.get(token).setGameChannel(socketChannel);
                 for (Player p: players) {
                     if (p.getName().equals(message.get(2))) {
@@ -272,18 +287,29 @@ public class Game implements Runnable {
                     }
 
                     String reconnectMsg;
-
-                    if (played.contains(p.getToken())) {
-                        reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "False";
+                    if (continueGame) {
+                        if (played.contains(p.getToken())) {
+                            reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "False";
+                        } else {
+                            reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "True";
+                        }
                     } else {
-                        reconnectMsg = GameCodes.RECONNECT + "," + turnCount + "," + team1String + "," + team2String + "," + team1HP + "," + team2HP + "," + "True";
+                        reconnectMsg = GameCodes.RECONNECT + "," + GameCodes.DISCONNECT;
                     }
-                    write(p.getGameChannel(), reconnectMsg);
+
+                    timeOutLock.readLock().lock();
+                    try {
+                        if (!timeOutList.containsKey(p.getName())) {
+                            write(p.getGameChannel(), reconnectMsg);
+                        }
+                    } finally {
+                        timeOutLock.readLock().unlock();
+                    }
                 }
 
                 break;
             case ERR:
-                System.out.println(serverPrefix + " FATAL ERROR - CLOSING SERVER");
+                System.out.println(ERROR(serverPrefix + " FATAL ERROR - CLOSING SERVER"));
                 this.error = true;
                 endGame(null, null);
                 break;
@@ -293,8 +319,6 @@ public class Game implements Runnable {
                     player.setGameChannel(socketChannel);
                     if (!playersReady.contains(player)) playersReady.add(player);
                     if (playersReady.size() == readyCount) {
-                        String startMessage = GameCodes.START + "," + team1String + "," + team2String;
-                        broadcast(startMessage, players);
                         String turnMessage = GameCodes.TURN + "," + turnCount + "," + team1HP + "," + team2HP;
                         broadcast(turnMessage, players);
                     }
@@ -328,10 +352,10 @@ public class Game implements Runnable {
 
     private void newTurn() throws IOException {
         if (team1HP <= 0) {
-            System.out.println(serverPrefix + " Team 2 wins");
+            System.out.println(SUCCESS(serverPrefix + " Team 2 wins"));
             endGame(team2, team1);
         } else if (team2HP <= 0) {
-            System.out.println(serverPrefix + " Team 1 wins");
+            System.out.println(SUCCESS(serverPrefix + " Team 1 wins"));
             endGame(team1, team2);
         } else {
             turnCount++;
@@ -419,7 +443,7 @@ public class Game implements Runnable {
     }
 
     private void disconnect(SocketChannel socketChannel) throws IOException {
-        System.out.println(serverPrefix + " Client player disconnected");
+        System.out.println(REGULAR(serverPrefix + " Client player disconnected"));
 
         socketChannel.close();
     }

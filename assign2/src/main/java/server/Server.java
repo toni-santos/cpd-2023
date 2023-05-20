@@ -1,6 +1,7 @@
 package server;
 
 import game.Game;
+import utils.Log;
 import utils.TokenGenerator;
 
 import java.io.*;
@@ -15,6 +16,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import static java.lang.System.currentTimeMillis;
 import static java.lang.System.exit;
+import static utils.Log.*;
+import static utils.Log.REGULAR;
 
 public class Server {
 
@@ -30,7 +33,7 @@ public class Server {
     private static final ReadWriteLock inGameLock = new ReentrantReadWriteLock();
     private Selector selector;
     private Map<String, Double> timeOutList = new HashMap<>();
-    private double timeOut = 5.0;
+    private double timeOut = 30.0;
     private Map<Player, String> inGamePlayers = new HashMap<>();
     private Map<SocketChannel, Player> clients;
     private Map<String, SocketChannel> playerSockets;
@@ -55,7 +58,7 @@ public class Server {
         serverSocketChannel.bind(new InetSocketAddress("localhost" , Integer.parseInt(port)));
         serverSocketChannel.configureBlocking(false);
         serverSocketChannel.register(selector, SelectionKey.OP_ACCEPT);
-        System.out.println("Server is listening on port 9000");
+        System.out.println(SUCCESS("Server is listening on port 9000"));
 
         // Start thread pool
         int maxGames = 1;
@@ -153,7 +156,9 @@ public class Server {
         if (timeOutList.size() != 0) {
             timeOutLock.readLock().lock();
             try {
-                for (Map.Entry<String, Double> entry: timeOutList.entrySet()) {
+                Iterator<Map.Entry<String, Double>> iterator = timeOutList.entrySet().iterator();
+                while(iterator.hasNext()) {
+                    Map.Entry<String, Double> entry = iterator.next();
                     double timePassed = (double) currentTimeMillis()/1000 -  entry.getValue()/1000;
                     if (timePassed >= timeOut) {
                         Player player = null;
@@ -167,12 +172,12 @@ public class Server {
 
                         clientsLock.writeLock().lock();
                         try {
-                            Iterator<Map.Entry<SocketChannel, Player>> iterator = clients.entrySet().iterator();
-                            while (iterator.hasNext()) {
-                                Map.Entry<SocketChannel, Player> e = iterator.next();
+                            Iterator<Map.Entry<SocketChannel, Player>> clientsIterator = clients.entrySet().iterator();
+                            while (clientsIterator.hasNext()) {
+                                Map.Entry<SocketChannel, Player> e = clientsIterator.next();
                                 if (e.getValue().getName().equals(entry.getKey())) {
                                     player = e.getValue();
-                                    iterator.remove();
+                                    clientsIterator.remove();
                                     break;
                                 }
                             }
@@ -182,11 +187,11 @@ public class Server {
 
                         inGameLock.writeLock().lock();
                         try {
-                            Iterator<Player> iterator = inGamePlayers.keySet().iterator();
-                            while (iterator.hasNext()) {
-                                Player p = iterator.next();
+                            Iterator<Player> inGameIterator = inGamePlayers.keySet().iterator();
+                            while (inGameIterator.hasNext()) {
+                                Player p = inGameIterator.next();
                                 if (p.getName().equals(entry.getKey())) {
-                                    iterator.remove();
+                                    inGameIterator.remove();
                                     break;
                                 }
                             }
@@ -220,7 +225,7 @@ public class Server {
                             R2Lock.writeLock().unlock();
                         }
 
-                        timeOutList.remove(entry.getKey());
+                        iterator.remove();
                     }
                 }
             } finally {
@@ -243,14 +248,14 @@ public class Server {
         waitListLock.readLock().lock();
         try {
             if (normal1v1.size() >= 2) {
-                System.out.println("Found a 1v1 Normal game");
+                System.out.println(REGULAR("Found a 1v1 Normal game"));
                 N1Game = true;
                 Player player1 = normal1v1.get(0);
                 Player player2 = normal1v1.get(1);
                 N1Players = Arrays.asList(player1, player2);
             }
             if (normal2v2.size() >= 4) {
-                System.out.println("Found a 2v2 Normal game");
+                System.out.println(REGULAR("Found a 2v2 Normal game"));
                 N2Game = true;
                 Player player1 = normal2v2.get(0);
                 Player player2 = normal2v2.get(1);
@@ -267,19 +272,16 @@ public class Server {
             else if (ranked1v1.size() >= 2) {
                 for (int i = 0; i < ranked1v1.size() - 1; i++) {
                     Player player1 = ranked1v1.get(i);
-                    System.out.println("player1.getElo() = " + player1.getElo());
                     for (int j = i + 1; j < ranked1v1.size(); j++) {
                         Player player2 = ranked1v1.get(j);
                         if (waitingForRanked1v1.contains(player2)) continue;
-                        System.out.println("player2.getElo() = " + player2.getElo());
                         List<Player> playerArray = Arrays.asList(player1, player2);
                         boolean elosInRange = true;
                         for (Player player: playerArray) {
                             elosInRange = elosInRange && checkEloRange(player, playerArray);
-                            System.out.println("elosInRange = " + elosInRange);
                         }
                         if (elosInRange) {
-                            System.out.println("Range match");
+                            System.out.println(REGULAR("Found a 1v1 Ranked game"));
                             R1Game = true;
                             R1Players = Arrays.asList(player1, player2);
                             for (Player player: R1Players) {
@@ -302,22 +304,19 @@ public class Server {
             else if (ranked2v2.size() >= 4) {
                 for (int i = 0; i < ranked2v2.size() - 3; i++) {
                     Player player1 = ranked2v2.get(i);
-                    System.out.println("player1.getElo() = " + player1.getElo());
                     for (int j = i + 1; j < ranked2v2.size() - 2; j++) {
                         Player player2 = ranked2v2.get(j);
                         Player player3 = ranked2v2.get(j+1);
                         Player player4 = ranked2v2.get(j+2);
                         if (waitingForRanked2v2.contains(player2) || waitingForRanked2v2.contains(player3)
                         || waitingForRanked2v2.contains(player4)) continue;
-                        System.out.println("player2.getElo() = " + player2.getElo());
                         List<Player> playerArray = Arrays.asList(player1, player2, player3, player4);
                         boolean elosInRange = true;
                         for (Player player: playerArray) {
                             elosInRange = elosInRange && checkEloRange(player, playerArray);
-                            System.out.println("elosInRange = " + elosInRange);
                         }
                         if (elosInRange) {
-                            System.out.println("Range match");
+                            System.out.println(REGULAR("Found a 2v2 Ranked game"));
                             R2Game = true;
                             R2Players = balanceTeams(playerArray);
                             for (Player player: R2Players) {
@@ -382,11 +381,8 @@ public class Server {
 
     private List<Player> balanceTeams(List<Player> players) {
         int sumTeam1and2 = getTeamEloDifference(players, Arrays.asList(0, 1, 2, 3));
-        System.out.println("sumTeam1and2 = " + sumTeam1and2);
         int sumTeam1and3 = getTeamEloDifference(players, Arrays.asList(0, 2, 1, 3));
-        System.out.println("sumTeam1and3 = " + sumTeam1and3);
         int sumTeam1and4 = getTeamEloDifference(players, Arrays.asList(0, 3, 1, 2));
-        System.out.println("sumTeam1and4 = " + sumTeam1and4);
         if (sumTeam1and2 <= sumTeam1and3 && sumTeam1and2 <= sumTeam1and4) {
             return Arrays.asList(players.get(0), players.get(1), players.get(2), players.get(3));
         }
@@ -409,11 +405,8 @@ public class Server {
         List<Player> losingPlayers = losers.stream().map(playerSockets::get).map(clients::get).toList();
 
         double winnerAverageElo = winningPlayers.stream().mapToInt(Player::getElo).average().orElse(0.0);
-        System.out.println("winnerAverageElo = " + winnerAverageElo);
         double loserAverageElo = losingPlayers.stream().mapToInt(Player::getElo).average().orElse(0.0);
-        System.out.println("loserAverageElo = " + loserAverageElo);
         int eloChange = (int) Math.floor(20 * loserAverageElo / winnerAverageElo);
-        System.out.println("eloChange = " + eloChange);
 
         for (String winner : winners) {
             Player player = clients.get(playerSockets.get(winner));
@@ -434,9 +427,6 @@ public class Server {
         for (Player player : playerList) {
             if (waitList.contains(player)) continue;
             player.setEloRange((currentSearchTime - player.getSearchTime()) / 100);
-            System.out.println("player.getElo() = " + player.getElo());
-            System.out.println("Range between " + (player.getElo() - player.getEloRange()) + " and " +
-                    (player.getElo() + player.getEloRange()));
         }
     }
 
@@ -613,6 +603,8 @@ public class Server {
                             response = ServerCodes.REC + "," + p.getToken();
                         }
 
+                        System.out.println(SUCCESS(p.getName() + " reconnected"));
+
                         updateLists(socketChannel, queue, p);
                         write(socketChannel, response);
 
@@ -634,14 +626,18 @@ public class Server {
                             playerSocketsLock.writeLock().unlock();
                         }
 
+                        System.out.println(SUCCESS(player.getName() + " logged in"));
+
                         // tell player they were logged in
                         write(socketChannel, response);
                     }
 
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
-                    System.out.println(response);
+
                     write(socketChannel, response);
+
+                    System.out.println(ERROR("A login attempt has failed"));
                 }
                 break;
             case REG:
@@ -659,13 +655,20 @@ public class Server {
                         clientsLock.writeLock().unlock();
                         playerSocketsLock.writeLock().unlock();
                     }
+
+                    System.out.println(REGULAR(player.getName() + " has just registered"));
+
                     write(socketChannel, response);
                 } else {
                     String response = String.valueOf(ServerCodes.ERR);
+
                     write(socketChannel, response);
+
+                    System.out.println(ERROR("A register attempt has failed"));
                 }
                 break;
             case DC:
+                System.out.println(REGULAR("Disconnected a client"));
                 disconnect(socketChannel);
                 break;
             case N1, N2:
@@ -687,11 +690,12 @@ public class Server {
                             N1Lock.writeLock().unlock();
                             N2Lock.writeLock().unlock();
                         }
+                        System.out.println(REGULAR(player.getName() + " is looking for a normal game"));
                     } finally {
                         clientsLock.readLock().unlock();
                     }
                 } else {
-                    System.out.println("INVALID TOKEN FOUND REMOVING CLIENT");
+                    System.out.println(ERROR("Invalid token found, disconnecting client"));
                     disconnect(socketChannel);
                 }
                 break;
@@ -718,11 +722,12 @@ public class Server {
                             R1Lock.writeLock().unlock();
                             R2Lock.writeLock().unlock();
                         }
+                        System.out.println(REGULAR(player.getName() + " is looking for a ranked game"));
                     } finally {
                         clientsLock.readLock().unlock();
                     }
                 } else {
-                    System.out.println("INVALID TOKEN FOUND REMOVING CLIENT");
+                    System.out.println(ERROR("Invalid token found, disconnecting client"));
                     disconnect(socketChannel);
                 }
                 break;
@@ -745,8 +750,9 @@ public class Server {
                     } finally {
                         inGameLock.writeLock().unlock();
                     }
+
+                    System.out.println(ERROR("Game ended abruptly in port " + port));
                 } else {
-                    System.out.println(message);
                     port = message.get(2);
                     gamemode = ServerCodes.valueOf(message.get(1));
                     List<String> winners, losers;
@@ -770,10 +776,9 @@ public class Server {
                         inGameLock.writeLock().unlock();
                         inGameLock.readLock().unlock();
                     }
+
+                    System.out.println(REGULAR("Game ended in port " + port));
                 }
-
-                System.out.println("Game ended in port " + port);
-
                 break;
             default:
                 break;
@@ -916,7 +921,6 @@ public class Server {
         playerSocketsLock.writeLock().lock();
         try {
             Player player = clients.get(socketChannel);
-            System.out.println("player = " + player);
             if (player != null) playerSockets.remove(player.getName());
             clients.remove(socketChannel);
         } finally {
@@ -924,7 +928,7 @@ public class Server {
             playerSocketsLock.writeLock().unlock();
         }
 
-        System.out.println("Client "+ clientName + " disconnected");
+        System.out.println(REGULAR("Client " + clientName + " disconnected"));
         socketChannel.close();
     }
 
@@ -940,7 +944,7 @@ public class Server {
         } finally {
             clientsLock.writeLock().unlock();
         }*/
-        System.out.println("Client " + socketChannel.getRemoteAddress() + " connected");
+        System.out.println(REGULAR("Client " + socketChannel.getRemoteAddress() + " connected"));
     }
 
     public static void main(String [] args) throws IOException {
